@@ -10,11 +10,30 @@ import "github.com/gographics/imagick/imagick"
 
 /*
  *  https://gowalker.org/github.com/gographics/imagick/imagick
- */
+ *
+* Logic:
+*
+* get image height
+* get image width
+*
+* divide height by 32
+* divide width by 32
+*
+* cycle through 32x32 x,y coordinates (1024 cycles)
+*         extract portion of image image
+*         GetImageChannelMean of portion for CHANNEL_RED, CHANNEL_GREEN, CHANNEL_BLUE ( and CHANNELS_GRAY? )
+*         add r, g, b (and gray?) mean values to array
+*
+* resulting array is used to compare similarity data
+*
+*/
 
 func main() {
 
 	// argsWithoutProg := os.Args[1:]
+
+	hreSize := uint(128)
+	vreSize := uint(128)
 
 	hSlices := uint(32)
 	vSlices := uint(32)
@@ -30,36 +49,57 @@ func main() {
 		fmt.Println("Error: ", err)
 	}
 
-	cellWidth := Divide(float64(mw.GetImageWidth()), hSlices)
-	cellHeight := Divide(float64(mw.GetImageHeight()), vSlices)
+	err = mw.ResizeImage(hreSize, vreSize, imagick.FILTER_GAUSSIAN, 0.25)
+	if err != nil {
+		fmt.Println("resize error: ", err)
+	}
 
-	// fmt.Println("Image cols: ", cellWidth)
-	// fmt.Println("Image rows: ", cellHeight)
+	cellWidth := hreSize / hSlices
+	cellHeight := vreSize / vSlices
 
-	/* will need to make sure we don't overflow at boundaries since we're rounding */
+	fmt.Println("width: ", mw.GetImageWidth())
+	fmt.Println("height: ", mw.GetImageHeight())
+
+	/*
+			 * colorData will hold color info for the image
+			 * since we're using a fixed number of cells,
+		     * this will be a one dimensional array of 1024 * 3 members
+	*/
+	colorData := make([]uint8, 3*hSlices*hSlices)
+	index := 0
+
+	mc := imagick.NewMagickWand()
+
 	for vCell := uint(0); vCell < vSlices; vCell++ {
-		ch := cellHeight
-		if vCell+1 == vSlices {
-			ch = mw.GetImageHeight() - (vCell * vSlices)
-		}
+
 		for hCell := uint(0); hCell < hSlices; hCell++ {
-			fmt.Printf("cells: %d, %d : ", vCell, hCell)
-			cw := cellWidth
-			if hCell+1 == hSlices {
-				cw = mw.GetImageWidth() - (hCell * hSlices)
+
+			mc = mw.GetImageRegion(cellWidth, cellHeight, int(vCell*cellHeight), int(hCell*cellWidth))
+			var redAvg, grnAvg, bluAvg float64
+
+			// fmt.Println("cell: ", vCell, hCell, int(hCell*hSlices))
+			if redAvg, _, err = mc.GetImageChannelMean(imagick.CHANNEL_RED); err != nil {
+				fmt.Println("red channel error: , ", err)
 			}
-			mc := mw.GetImageRegion(cw, ch, int(vCell*vSlices), int(hCell*hSlices))
-			redAvg, _, err := mc.GetImageChannelMean(imagick.CHANNEL_RED)
-			grnAvg, _, err := mc.GetImageChannelMean(imagick.CHANNEL_GREEN)
-			bluAvg, _, err := mc.GetImageChannelMean(imagick.CHANNEL_BLUE)
-			if err != nil {
-				fmt.Println("channel error: , ", err)
+			if grnAvg, _, err = mc.GetImageChannelMean(imagick.CHANNEL_GREEN); err != nil {
+				fmt.Println("green channel error: , ", err)
 			}
+			if bluAvg, _, err = mc.GetImageChannelMean(imagick.CHANNEL_BLUE); err != nil {
+				fmt.Println("blue channel error: , ", err)
+			}
+
 			// these channels are 16 bit? knock down to 8 bit colors
-			redRnd := Divide(redAvg, 256)
-			grnRnd := Divide(grnAvg, 256)
-			bluRnd := Divide(bluAvg, 256)
+			redRnd := uint8(Divide(redAvg, 256))
+			grnRnd := uint8(Divide(grnAvg, 256))
+			bluRnd := uint8(Divide(bluAvg, 256))
+
+			// colorData = append(colorData, redRnd, grnRnd, bluRnd)
+			colorData[index+0] = redRnd
+			colorData[index+1] = grnRnd
+			colorData[index+2] = bluRnd
+			index += 3
 			fmt.Println(redRnd, grnRnd, bluRnd)
+
 		}
 		// os.Exit(0) // TESTING
 	}
