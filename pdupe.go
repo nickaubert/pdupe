@@ -1,7 +1,29 @@
 package main
 
+/*
+ *  https://gowalker.org/github.com/gographics/imagick/imagick
+ *
+ * Logic:
+ *
+ * get image height
+ * get image width
+ *
+ * divide height by 32
+ * divide width by 32
+ *
+ * cycle through 32x32 x,y coordinates (1024 cycles)
+ *         extract portion of image image
+ *         GetImageChannelMean of portion for CHANNEL_RED, CHANNEL_GREEN, CHANNEL_BLUE ( and CHANNELS_GRAY? )
+ *         add r, g, b (and gray?) mean values to array
+ *
+ * resulting array is used to compare similarity data
+ *
+ */
+
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"os"
 )
@@ -15,35 +37,22 @@ const (
 	VReSize = 128
 )
 
-/*
- *  https://gowalker.org/github.com/gographics/imagick/imagick
- *
-* Logic:
-*
-* get image height
-* get image width
-*
-* divide height by 32
-* divide width by 32
-*
-* cycle through 32x32 x,y coordinates (1024 cycles)
-*         extract portion of image image
-*         GetImageChannelMean of portion for CHANNEL_RED, CHANNEL_GREEN, CHANNEL_BLUE ( and CHANNELS_GRAY? )
-*         add r, g, b (and gray?) mean values to array
-*
-* resulting array is used to compare similarity data
-*
-*/
-
 func main() {
 
 	imagick.Initialize()
 	defer imagick.Terminate()
 
 	for _, arg := range os.Args[1:] {
-		fmt.Println("arg: ", arg)
 		colorData := getColorData(arg)
-		fmt.Println(arg, "data: ", colorData)
+		err := validateCD(colorData)
+		outfile := arg + ".colordata"
+		b, _ := json.Marshal(colorData)
+		// fmt.Println(arg, "data: ", b)
+		err = ioutil.WriteFile(outfile, b, 0644)
+		if err != nil {
+			fmt.Println("Error writing to ", outfile, err)
+			continue
+		}
 	}
 
 }
@@ -82,13 +91,13 @@ func getColorData(file string) []uint8 {
 	mw := imagick.NewMagickWand()
 	defer mw.Destroy()
 
-	colorData := make([]uint8, 3*HSlices*VSlices)
+	// colorData := make([]uint8, 3*HSlices*VSlices)
+	var colorData []uint8
 
 	err := mw.ReadImage(file)
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return colorData
-
 	}
 
 	err = mw.ResizeImage(HReSize, VReSize, imagick.FILTER_GAUSSIAN, 0.25)
@@ -99,15 +108,11 @@ func getColorData(file string) []uint8 {
 	cellWidth := HReSize / HSlices
 	cellHeight := VReSize / VSlices
 
-	fmt.Println("width: ", mw.GetImageWidth())
-	fmt.Println("height: ", mw.GetImageHeight())
-
 	/*
-			 * colorData will hold color info for the image
-			 * since we're using a fixed number of cells,
-		     * this will be a one dimensional array of 1024 * 3 members
-	*/
-	index := 0
+	* colorData will hold color info for the image
+	* since we're using a fixed number of cells,
+	* this will be a one dimensional array of 1024 * 3 members
+	 */
 
 	redDepth := mw.GetImageChannelDepth(imagick.CHANNEL_RED)
 	grnDepth := mw.GetImageChannelDepth(imagick.CHANNEL_GREEN)
@@ -115,6 +120,7 @@ func getColorData(file string) []uint8 {
 
 	mc := imagick.NewMagickWand()
 
+	// index := 0
 	for vCell := 0; vCell < VSlices; vCell++ {
 
 		for hCell := 0; hCell < HSlices; hCell++ {
@@ -137,13 +143,38 @@ func getColorData(file string) []uint8 {
 			grnRnd := make8bit(grnAvg, grnDepth)
 			bluRnd := make8bit(bluAvg, bluDepth)
 
-			colorData[index+0] = redRnd
-			colorData[index+1] = grnRnd
-			colorData[index+2] = bluRnd
-			index += 3
+			// colorData = append(colorData, redRnd, grnRnd, bluRnd)
+			colorData = append(colorData, redRnd, grnRnd, bluRnd)
+
+			// colorData[index+0] = redRnd
+			// colorData[index+1] = grnRnd
+			// colorData[index+2] = bluRnd
+			_ = redRnd
+			_ = grnRnd
+			_ = bluRnd
+			// index += 3
 
 		}
+		fmt.Println("len: ", len(colorData))
 	}
 
 	return colorData
+}
+
+func validateCD(cd []uint8) error {
+	/*  we are expecting a very specific type of output so verify nothing weird happened
+	 */
+	gotLen := len(cd)
+	xpcLen := 3 * HSlices * VSlices
+	if gotLen != xpcLen {
+		return fmt.Errorf("Expect array length %d, got %d\n", xpcLen, gotLen)
+	}
+	sum := 0
+	for _, i := range cd {
+		sum += i
+	}
+	if i == 0 {
+		return fmt.Errorf("No data in array\n")
+	}
+	return nil
 }
