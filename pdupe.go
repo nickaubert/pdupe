@@ -27,6 +27,7 @@ import (
 	"io/ioutil"
 	"math"
 	"os"
+	"strings"
 )
 
 import "github.com/gographics/imagick/imagick"
@@ -43,7 +44,9 @@ func main() {
 	imagick.Initialize()
 	defer imagick.Terminate()
 
-	for _, arg := range os.Args[1:] {
+	jpegs := checkArgs(os.Args)
+
+	for _, arg := range jpegs {
 
 		colorData := getColorData(arg)
 
@@ -111,10 +114,19 @@ func getColorData(file string) []uint8 {
 		return colorData
 	}
 
-	err = mw.ResizeImage(HReSize, VReSize, imagick.FILTER_GAUSSIAN, 0.25)
+	/* hm, maybe chop original image into pieces first, then resize those */
+	err = mw.ResizeImage(HReSize, VReSize, imagick.FILTER_GAUSSIAN, 0.1)
 	if err != nil {
 		fmt.Println("resize error: ", err)
 	}
+
+	// TESTING
+	/*
+		err = mw.WriteImage("resized.jpg")
+		if err != nil {
+			fmt.Println("print resize error: ", err)
+		}
+	*/
 
 	cellWidth := HReSize / HSlices
 	cellHeight := VReSize / VSlices
@@ -137,6 +149,18 @@ func getColorData(file string) []uint8 {
 		for hCell := 0; hCell < HSlices; hCell++ {
 
 			mc = mw.GetImageRegion(uint(cellWidth), uint(cellHeight), int(vCell*cellHeight), int(hCell*cellWidth))
+
+			// TESTING writing to a file
+			/*
+				tmpOut := fmt.Sprintf("out-%02d-%02d.jpg", vCell, hCell)
+				err := mc.WriteImage(tmpOut)
+				if err != nil {
+					fmt.Println("write error: ", err)
+					os.Exit(1)
+				}
+				// os.Exit(0)
+			*/
+
 			var redAvg, grnAvg, bluAvg float64
 
 			if redAvg, _, err = mc.GetImageChannelMean(imagick.CHANNEL_RED); err != nil {
@@ -149,6 +173,9 @@ func getColorData(file string) []uint8 {
 				fmt.Println("blue channel error: , ", err)
 			}
 
+			// fmt.Printf("%02d %02d red: %04d\n", vCell, hCell, int(redAvg))
+			// fmt.Printf("%02d %02d blu: %04d\n", vCell, hCell, int(bluAvg))
+
 			/* make sure we're using 8 bit color */
 			redRnd := make8bit(redAvg, redDepth)
 			grnRnd := make8bit(grnAvg, grnDepth)
@@ -156,12 +183,9 @@ func getColorData(file string) []uint8 {
 
 			colorData = append(colorData, redRnd, grnRnd, bluRnd)
 
-			_ = redRnd
-			_ = grnRnd
-			_ = bluRnd
-
 		}
 		// fmt.Println("len: ", len(colorData))
+		// os.Exit(0)
 	}
 
 	return colorData
@@ -199,4 +223,18 @@ func jmart(cd []uint8) string {
 	}
 	jr += " ]"
 	return jr
+}
+
+func checkArgs(args []string) []string {
+	var jpegs []string
+	for _, arg := range args[1:] {
+		if _, err := os.Stat(arg); os.IsNotExist(err) {
+			fmt.Printf("no such file or directory: %s", arg)
+			os.Exit(1)
+		}
+		if strings.HasSuffix(arg, ".jpg") {
+			jpegs = append(jpegs, arg)
+		}
+	}
+	return jpegs
 }
