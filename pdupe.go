@@ -21,6 +21,8 @@ package main
  */
 
 import (
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -42,21 +44,27 @@ func main() {
 	defer imagick.Terminate()
 
 	for _, arg := range os.Args[1:] {
+
 		colorData := getColorData(arg)
+
 		err := validateCD(colorData)
 		if err != nil {
 			fmt.Println("Error validating generated data: ", err)
 			continue
 		}
-		outfile := arg + ".colordata"
-		b := jmart(colorData)
-		// b, _ := json.Marshal(colorData)
-		// fmt.Println(arg, "data: ", b)
-		err = ioutil.WriteFile(outfile, []byte(b), 0644)
+
+		outfile := arg + ".cd.gz"
+		j := jmart(colorData)
+		var b bytes.Buffer
+		w := gzip.NewWriter(&b)
+		w.Write([]byte(j))
+		w.Close()
+		err = ioutil.WriteFile(outfile, b.Bytes(), 0644)
 		if err != nil {
 			fmt.Println("Error writing to ", outfile, err)
 			continue
 		}
+
 	}
 
 }
@@ -95,7 +103,6 @@ func getColorData(file string) []uint8 {
 	mw := imagick.NewMagickWand()
 	defer mw.Destroy()
 
-	// colorData := make([]uint8, 3*HSlices*VSlices)
 	var colorData []uint8
 
 	err := mw.ReadImage(file)
@@ -142,21 +149,16 @@ func getColorData(file string) []uint8 {
 				fmt.Println("blue channel error: , ", err)
 			}
 
-			// make sure we're using 8 bit color
+			/* make sure we're using 8 bit color */
 			redRnd := make8bit(redAvg, redDepth)
 			grnRnd := make8bit(grnAvg, grnDepth)
 			bluRnd := make8bit(bluAvg, bluDepth)
 
-			// colorData = append(colorData, redRnd, grnRnd, bluRnd)
 			colorData = append(colorData, redRnd, grnRnd, bluRnd)
 
-			// colorData[index+0] = redRnd
-			// colorData[index+1] = grnRnd
-			// colorData[index+2] = bluRnd
 			_ = redRnd
 			_ = grnRnd
 			_ = bluRnd
-			// index += 3
 
 		}
 		// fmt.Println("len: ", len(colorData))
