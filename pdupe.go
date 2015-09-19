@@ -21,7 +21,6 @@ package main
  */
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -45,10 +44,15 @@ func main() {
 	for _, arg := range os.Args[1:] {
 		colorData := getColorData(arg)
 		err := validateCD(colorData)
+		if err != nil {
+			fmt.Println("Error validating generated data: ", err)
+			continue
+		}
 		outfile := arg + ".colordata"
-		b, _ := json.Marshal(colorData)
+		b := jmart(colorData)
+		// b, _ := json.Marshal(colorData)
 		// fmt.Println(arg, "data: ", b)
-		err = ioutil.WriteFile(outfile, b, 0644)
+		err = ioutil.WriteFile(outfile, []byte(b), 0644)
 		if err != nil {
 			fmt.Println("Error writing to ", outfile, err)
 			continue
@@ -155,7 +159,7 @@ func getColorData(file string) []uint8 {
 			// index += 3
 
 		}
-		fmt.Println("len: ", len(colorData))
+		// fmt.Println("len: ", len(colorData))
 	}
 
 	return colorData
@@ -169,12 +173,28 @@ func validateCD(cd []uint8) error {
 	if gotLen != xpcLen {
 		return fmt.Errorf("Expect array length %d, got %d\n", xpcLen, gotLen)
 	}
-	sum := 0
+	sum := uint8(0)
 	for _, i := range cd {
 		sum += i
 	}
-	if i == 0 {
+	if sum == 0 {
 		return fmt.Errorf("No data in array\n")
 	}
 	return nil
+}
+
+func jmart(cd []uint8) string {
+	/* json.Marshall wants to convert uint8 to chars
+	 * I'd prefer it didn't
+	 */
+	jr := "["
+	maxComma := len(cd) - 1
+	for k, v := range cd {
+		jr += fmt.Sprintf(" %d", v)
+		if k < maxComma {
+			jr += ","
+		}
+	}
+	jr += " ]"
+	return jr
 }
