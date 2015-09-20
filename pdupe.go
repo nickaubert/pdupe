@@ -23,6 +23,7 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -31,6 +32,11 @@ import (
 )
 
 import "github.com/gographics/imagick/imagick"
+
+type imageInfo struct {
+	Name  string
+	Cdata []uint8
+}
 
 const (
 	HSlices = 32
@@ -41,33 +47,18 @@ const (
 
 func main() {
 
-	imagick.Initialize()
-	defer imagick.Terminate()
+	jpegs, dataFiles := checkArgs(os.Args)
 
-	jpegs := checkArgs(os.Args)
+	err := scanJpegs(jpegs)
+	if err != nil {
+		fmt.Println("Error processing images:", err)
+		os.Exit(1)
+	}
 
-	for _, arg := range jpegs {
-
-		colorData := getColorData(arg)
-
-		err := validateCD(colorData)
-		if err != nil {
-			fmt.Println("Error validating generated data: ", err)
-			continue
-		}
-
-		outfile := arg + ".cd.gz"
-		j := jmart(colorData)
-		var b bytes.Buffer
-		w := gzip.NewWriter(&b)
-		w.Write([]byte(j))
-		w.Close()
-		err = ioutil.WriteFile(outfile, b.Bytes(), 0644)
-		if err != nil {
-			fmt.Println("Error writing to ", outfile, err)
-			continue
-		}
-
+	err = scanDataFiles(dataFiles)
+	if err != nil {
+		fmt.Println("Error processing data files:", err)
+		os.Exit(1)
 	}
 
 }
@@ -101,12 +92,15 @@ func difference(a, b uint) uint {
 	return b - a
 }
 
-func getColorData(file string) []uint8 {
+func getColorData(file string) imageInfo {
+
+	var colorData imageInfo
+	colorData.Name = file
+
+	fmt.Println("reading color data for ", file)
 
 	mw := imagick.NewMagickWand()
 	defer mw.Destroy()
-
-	var colorData []uint8
 
 	err := mw.ReadImage(file)
 	if err != nil {
@@ -181,7 +175,7 @@ func getColorData(file string) []uint8 {
 			grnRnd := make8bit(grnAvg, grnDepth)
 			bluRnd := make8bit(bluAvg, bluDepth)
 
-			colorData = append(colorData, redRnd, grnRnd, bluRnd)
+			colorData.Cdata = append(colorData.Cdata, redRnd, grnRnd, bluRnd)
 
 		}
 		// fmt.Println("len: ", len(colorData))
@@ -191,16 +185,16 @@ func getColorData(file string) []uint8 {
 	return colorData
 }
 
-func validateCD(cd []uint8) error {
+func validateCD(cd imageInfo) error {
 	/*  we are expecting a very specific type of output so verify nothing weird happened
 	 */
-	gotLen := len(cd)
+	gotLen := len(cd.Cdata)
 	xpcLen := 3 * HSlices * VSlices
 	if gotLen != xpcLen {
 		return fmt.Errorf("Expect array length %d, got %d\n", xpcLen, gotLen)
 	}
 	sum := uint8(0)
-	for _, i := range cd {
+	for _, i := range cd.Cdata {
 		sum += i
 	}
 	if sum == 0 {
@@ -209,10 +203,11 @@ func validateCD(cd []uint8) error {
 	return nil
 }
 
+/*
 func jmart(cd []uint8) string {
-	/* json.Marshall wants to convert uint8 to chars
+	// /* json.Marshall wants to convert uint8 to chars
 	 * I'd prefer it didn't
-	 */
+	// *
 	jr := "["
 	maxComma := len(cd) - 1
 	for k, v := range cd {
@@ -224,17 +219,116 @@ func jmart(cd []uint8) string {
 	jr += " ]"
 	return jr
 }
+*/
 
-func checkArgs(args []string) []string {
+func checkArgs(args []string) ([]string, []string) {
 	var jpegs []string
+	var cdfiles []string
 	for _, arg := range args[1:] {
 		if _, err := os.Stat(arg); os.IsNotExist(err) {
 			fmt.Printf("no such file or directory: %s", arg)
 			os.Exit(1)
 		}
-		if strings.HasSuffix(arg, ".jpg") {
+		switch {
+		case strings.HasSuffix(arg, ".jpg"):
 			jpegs = append(jpegs, arg)
+		case strings.HasSuffix(arg, ".cd.gz"):
+			cdfiles = append(cdfiles, arg)
+		default:
+			fmt.Println("Cannot process unrecognized file type", arg)
+			os.Exit(1)
 		}
 	}
-	return jpegs
+	if len(jpegs) > 0 {
+		if len(cdfiles) > 0 {
+			fmt.Println("Cannot process photos and data files at the same time")
+			os.Exit(1)
+		}
+		return jpegs, cdfiles
+	}
+	if len(cdfiles) == 0 {
+		fmt.Println("Must select files to process")
+		os.Exit(1)
+	}
+	return jpegs, cdfiles
+}
+
+func scanDataFiles(dataFiles []string) error {
+
+	var images []imageInfo
+	for _, dataFile := range dataFiles {
+		fmt.Println("process data file", dataFile)
+		data, err := ReadGzFile(dataFile)
+		if err != nil {
+			fmt.Println("Error unziping", dataFile, ":", err)
+		}
+		var image imageInfo
+		err = json.Unmarshal(data, &image)
+		if err != nil {
+			fmt.Println("Cannot process json from", dataFile, ":", err)
+			continue
+		}
+		images = append(images, image)
+	}
+
+	return nil
+}
+
+func scanJpegs(jpegs []string) error {
+
+	imagick.Initialize()
+	defer imagick.Terminate()
+
+	for _, arg := range jpegs {
+
+		colorData := getColorData(arg)
+
+		err := validateCD(colorData)
+		if err != nil {
+			fmt.Println("Error validating generated data: ", err)
+			continue
+		}
+
+		outfile := arg + ".cd.gz"
+
+		j, err := json.Marshal(colorData)
+		if err != nil {
+			fmt.Println("error:", err)
+			continue
+		}
+
+		var b bytes.Buffer
+		w := gzip.NewWriter(&b)
+		w.Write(j)
+		w.Close()
+		err = ioutil.WriteFile(outfile, b.Bytes(), 0644)
+		if err != nil {
+			fmt.Println("Error writing to ", outfile, err)
+			continue
+		}
+
+	}
+
+	return nil
+}
+
+/* http://stackoverflow.com/questions/16890648/how-can-i-use-golangs-compress-gzip-package-to-gzip-a-file */
+func ReadGzFile(filename string) ([]byte, error) {
+	fi, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer fi.Close()
+
+	fz, err := gzip.NewReader(fi)
+	if err != nil {
+		return nil, err
+	}
+	defer fz.Close()
+
+	s, err := ioutil.ReadAll(fz)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }
