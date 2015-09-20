@@ -85,7 +85,7 @@ func make8bit(fullColor float64, depth uint) uint8 {
 	return flatColor
 }
 
-func difference(a, b uint) uint {
+func difference(a, b uint8) uint8 {
 	if a > b {
 		return a - b
 	}
@@ -114,14 +114,6 @@ func getColorData(file string) imageInfo {
 		fmt.Println("resize error: ", err)
 	}
 
-	// TESTING
-	/*
-		err = mw.WriteImage("resized.jpg")
-		if err != nil {
-			fmt.Println("print resize error: ", err)
-		}
-	*/
-
 	cellWidth := HReSize / HSlices
 	cellHeight := VReSize / VSlices
 
@@ -144,17 +136,6 @@ func getColorData(file string) imageInfo {
 
 			mc = mw.GetImageRegion(uint(cellWidth), uint(cellHeight), int(vCell*cellHeight), int(hCell*cellWidth))
 
-			// TESTING writing to a file
-			/*
-				tmpOut := fmt.Sprintf("out-%02d-%02d.jpg", vCell, hCell)
-				err := mc.WriteImage(tmpOut)
-				if err != nil {
-					fmt.Println("write error: ", err)
-					os.Exit(1)
-				}
-				// os.Exit(0)
-			*/
-
 			var redAvg, grnAvg, bluAvg float64
 
 			if redAvg, _, err = mc.GetImageChannelMean(imagick.CHANNEL_RED); err != nil {
@@ -167,9 +148,6 @@ func getColorData(file string) imageInfo {
 				fmt.Println("blue channel error: , ", err)
 			}
 
-			// fmt.Printf("%02d %02d red: %04d\n", vCell, hCell, int(redAvg))
-			// fmt.Printf("%02d %02d blu: %04d\n", vCell, hCell, int(bluAvg))
-
 			/* make sure we're using 8 bit color */
 			redRnd := make8bit(redAvg, redDepth)
 			grnRnd := make8bit(grnAvg, grnDepth)
@@ -178,8 +156,6 @@ func getColorData(file string) imageInfo {
 			colorData.Cdata = append(colorData.Cdata, redRnd, grnRnd, bluRnd)
 
 		}
-		// fmt.Println("len: ", len(colorData))
-		// os.Exit(0)
 	}
 
 	return colorData
@@ -202,24 +178,6 @@ func validateCD(cd imageInfo) error {
 	}
 	return nil
 }
-
-/*
-func jmart(cd []uint8) string {
-	// /* json.Marshall wants to convert uint8 to chars
-	 * I'd prefer it didn't
-	// *
-	jr := "["
-	maxComma := len(cd) - 1
-	for k, v := range cd {
-		jr += fmt.Sprintf(" %d", v)
-		if k < maxComma {
-			jr += ","
-		}
-	}
-	jr += " ]"
-	return jr
-}
-*/
 
 func checkArgs(args []string) ([]string, []string) {
 	var jpegs []string
@@ -257,7 +215,7 @@ func scanDataFiles(dataFiles []string) error {
 
 	var images []imageInfo
 	for _, dataFile := range dataFiles {
-		fmt.Println("process data file", dataFile)
+		// fmt.Println("process data file", dataFile)
 		data, err := ReadGzFile(dataFile)
 		if err != nil {
 			fmt.Println("Error unziping", dataFile, ":", err)
@@ -269,6 +227,17 @@ func scanDataFiles(dataFiles []string) error {
 			continue
 		}
 		images = append(images, image)
+	}
+
+	/* compare each file to the others */
+	for k, image := range images {
+		if k+1 == len(images) {
+			break
+		}
+		for _, cimage := range images[k+1:] {
+			diffAvg := compareColors(image, cimage)
+			fmt.Println(image.Name, "->", cimage.Name, "=", diffAvg)
+		}
 	}
 
 	return nil
@@ -331,4 +300,14 @@ func ReadGzFile(filename string) ([]byte, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func compareColors(imageA, imageB imageInfo) float64 {
+	diffSum := 0
+	var diffAvg float64
+	for k, _ := range imageA.Cdata {
+		diffSum += int(difference(imageA.Cdata[k], imageB.Cdata[k]))
+	}
+	diffAvg = float64(diffSum) / float64(len(imageA.Cdata))
+	return diffAvg
 }
