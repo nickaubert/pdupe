@@ -35,14 +35,16 @@ import "github.com/gographics/imagick/imagick"
 
 type imageInfo struct {
 	Name  string
+	Path  string
 	Cdata []uint8
 }
 
 const (
-	HSlices = 32
-	VSlices = 32
-	HReSize = 128
-	VReSize = 128
+	HSlices     = 32
+	VSlices     = 32
+	HReSize     = 128
+	VReSize     = 128
+	matchThresh = 10
 )
 
 func main() {
@@ -158,6 +160,7 @@ func getColorData(file string) imageInfo {
 		}
 	}
 
+	mw.Destroy()
 	return colorData
 }
 
@@ -215,7 +218,6 @@ func scanDataFiles(dataFiles []string) error {
 
 	var images []imageInfo
 	for _, dataFile := range dataFiles {
-		// fmt.Println("process data file", dataFile)
 		data, err := ReadGzFile(dataFile)
 		if err != nil {
 			fmt.Println("Error unziping", dataFile, ":", err)
@@ -226,17 +228,28 @@ func scanDataFiles(dataFiles []string) error {
 			fmt.Println("Cannot process json from", dataFile, ":", err)
 			continue
 		}
+		image.Path = "\"" + image.Name + "\""
+		imagefile := strings.TrimSuffix(dataFile, ".cd.gz")
+		_, err = os.Stat(imagefile)
+		if err == nil {
+			image.Path = imagefile
+		}
 		images = append(images, image)
 	}
 
 	/* compare each file to the others */
+	matched := ""
 	for k, image := range images {
 		if k+1 == len(images) {
 			break
 		}
 		for _, cimage := range images[k+1:] {
 			diffAvg := compareColors(image, cimage)
-			fmt.Println(image.Name, "->", cimage.Name, "=", diffAvg)
+			matched = ""
+			if diffAvg < float64(matchThresh) {
+				matched = "MATCH"
+			}
+			fmt.Printf("%04f: %s %s %s\n", diffAvg, matched, image.Path, cimage.Path)
 		}
 	}
 
