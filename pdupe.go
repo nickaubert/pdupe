@@ -33,10 +33,17 @@ import (
 
 import "github.com/gographics/imagick/imagick"
 
+// import imagick "github.com/rainycape/magick"
+
 type imageInfo struct {
 	Name  string
 	Path  string
 	Cdata []uint8
+}
+
+type diffInfo struct {
+	Avg    float64
+	StdDev float64
 }
 
 const (
@@ -238,18 +245,23 @@ func scanDataFiles(dataFiles []string) error {
 	}
 
 	/* compare each file to the others */
-	matched := ""
+	/* matched := "" */
 	for k, image := range images {
 		if k+1 == len(images) {
 			break
 		}
 		for _, cimage := range images[k+1:] {
-			diffAvg := compareColors(image, cimage)
-			matched = ""
-			if diffAvg < float64(matchThresh) {
-				matched = "MATCH"
-			}
-			fmt.Printf("%04f: %s %s %s\n", diffAvg, matched, image.Path, cimage.Path)
+			/* red green blue */
+			diffRed, diffGreen, diffBlue := compareColors(image, cimage)
+			/*
+				matched = ""
+				if diffAvg < float64(matchThresh) {
+					matched = "MATCH"
+				}
+				fmt.Printf("%04f: %s %s %s\n", diffAvg, matched, image.Path, cimage.Path)
+			*/
+			fmt.Printf("%04f, %04f, %04f: %s %s\n", diffRed.Avg, diffGreen.Avg, diffBlue.Avg, image.Path, cimage.Path)
+			fmt.Printf("%04f, %04f, %04f: %s %s\n", diffRed.StdDev, diffGreen.StdDev, diffBlue.StdDev, image.Path, cimage.Path)
 		}
 	}
 
@@ -315,12 +327,58 @@ func ReadGzFile(filename string) ([]byte, error) {
 	return s, nil
 }
 
-func compareColors(imageA, imageB imageInfo) float64 {
-	diffSum := 0
-	var diffAvg float64
+func compareColors(imageA, imageB imageInfo) (diffInfo, diffInfo, diffInfo) {
+	// diffSum := 0
+	// var diffAvg float64
+	var diffReds, diffGreens, diffBlues []float64
+	/* cycle = red, green, blue */
+	cycle := 0
+	var cellA float64
+	var cellB float64
 	for k, _ := range imageA.Cdata {
-		diffSum += int(difference(imageA.Cdata[k], imageB.Cdata[k]))
+		cellA = float64(imageA.Cdata[k])
+		cellB = float64(imageB.Cdata[k])
+		switch {
+		case cycle == 0:
+			diffReds = append(diffReds, cellA-cellB)
+		case cycle == 1:
+			diffGreens = append(diffGreens, cellA-cellB)
+		case cycle == 2:
+			diffBlues = append(diffBlues, cellA-cellB)
+		}
+		cycle++
+		if cycle > 2 {
+			cycle = 0
+		}
 	}
-	diffAvg = float64(diffSum) / float64(len(imageA.Cdata))
-	return diffAvg
+	var diffRed, diffGreen, diffBlue diffInfo
+	diffRed.Avg = getMean(diffReds)
+	diffRed.StdDev = getStdDev(diffReds, diffRed.Avg)
+	diffGreen.Avg = getMean(diffGreens)
+	diffGreen.StdDev = getStdDev(diffGreens, diffGreen.Avg)
+	diffBlue.Avg = getMean(diffBlues)
+	diffBlue.StdDev = getStdDev(diffBlues, diffBlue.Avg)
+	// diffAvg = float64(diffSum) / float64(len(imageA.Cdata))
+	return diffRed, diffGreen, diffBlue
+}
+
+/* https://github.com/ae6rt/golang-examples/blob/master/goeg/src/statistics_ans/statistics.go */
+func getStdDev(numbers []float64, mean float64) float64 {
+	total := 0.0
+	for _, number := range numbers {
+		total += math.Pow(number-mean, 2)
+	}
+	variance := total / float64(len(numbers)-1)
+	return math.Sqrt(variance)
+}
+
+func getMean(numbers []float64) float64 {
+	sum := 0.0
+	if len(numbers) == 0 {
+		return sum
+	}
+	for _, v := range numbers {
+		sum += v
+	}
+	return (sum / float64(len(numbers)))
 }
