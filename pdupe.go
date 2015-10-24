@@ -205,8 +205,10 @@ func checkArgs(args []string) ([]string, []string) {
 	var cdfiles []string
 	for _, arg := range args {
 		if _, err := os.Stat(arg); os.IsNotExist(err) {
-			fmt.Printf("no such file or directory: %s\n", arg)
-			os.Exit(1)
+			os.Stderr.WriteString(fmt.Sprintf("No such file: %s\n", arg))
+			// fmt.Printf("no such file or directory: %s\n", arg)
+			// os.Exit(1)
+			continue
 		}
 		switch {
 		case strings.HasSuffix(arg, ".jpg"):
@@ -214,8 +216,10 @@ func checkArgs(args []string) ([]string, []string) {
 		case strings.HasSuffix(arg, ".cd.gz"):
 			cdfiles = append(cdfiles, arg)
 		default:
-			fmt.Println("Cannot process unrecognized file type", arg)
-			os.Exit(1)
+			os.Stderr.WriteString(fmt.Sprintf("Cannot process unrecognized file type", arg))
+			// fmt.Println("Cannot process unrecognized file type", arg)
+			// os.Exit(1)
+			continue
 		}
 	}
 	if len(jpegs) > 0 {
@@ -239,8 +243,9 @@ func scanDataFiles(s status, dataFiles []string) error {
 	if s.SFile != "" {
 		sImage, err = scanImageData(s.SFile)
 		if err != nil {
-			fmt.Println("Error scanning reference image data: ", err)
-			os.Exit(1)
+			os.Stderr.WriteString(fmt.Sprintf("Error scanning reference image data: ", err))
+			// fmt.Println("Error scanning reference image data: ", err)
+			//os.Exit(1)
 		}
 	}
 
@@ -248,8 +253,9 @@ func scanDataFiles(s status, dataFiles []string) error {
 	for _, dataFile := range dataFiles {
 		image, err := scanImageData(dataFile)
 		if err != nil {
-			fmt.Println("Error scanning image data: ", err)
-			continue
+			os.Stderr.WriteString(fmt.Sprintf("Error scanning image data: ", err))
+			// fmt.Println("Error scanning image data: ", err)
+			// continue
 		}
 		images = append(images, image)
 	}
@@ -297,7 +303,8 @@ func scanJpegs(s status, jpegs []string) error {
 
 		err := validateCD(colorData)
 		if err != nil {
-			fmt.Println("Error validating generated data: ", err)
+			os.Stderr.WriteString(fmt.Sprintf("Error validating generated data: %q", err))
+			// fmt.Println("Error validating generated data: ", err)
 			continue
 		}
 
@@ -305,7 +312,8 @@ func scanJpegs(s status, jpegs []string) error {
 
 		j, err := json.Marshal(colorData)
 		if err != nil {
-			fmt.Println("error:", err)
+			os.Stderr.WriteString(fmt.Sprintf("Error: %q", err))
+			// fmt.Println("error:", err)
 			continue
 		}
 
@@ -315,7 +323,8 @@ func scanJpegs(s status, jpegs []string) error {
 		w.Close()
 		err = ioutil.WriteFile(outfile, b.Bytes(), 0644)
 		if err != nil {
-			fmt.Println("Error writing to ", outfile, err)
+			// fmt.Println("Error writing to ", outfile, err)
+			os.Stderr.WriteString(fmt.Sprintf("Error writing to %s: %q", outfile, err))
 			continue
 		}
 
