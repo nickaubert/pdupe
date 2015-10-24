@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -39,6 +40,10 @@ type imageInfo struct {
 	Cdata []uint8
 }
 
+type status struct {
+	SFile string
+}
+
 const (
 	HSlices     = 32
 	VSlices     = 32
@@ -49,15 +54,28 @@ const (
 
 func main() {
 
-	jpegs, dataFiles := checkArgs(os.Args)
+	single_file := flag.String("s", "", "compare single file")
+	flag.Parse()
 
-	err := scanJpegs(jpegs)
+	var s status
+	s.SFile = *single_file
+
+	jpegs, dataFiles := checkArgs(flag.Args())
+
+	if s.SFile != "" {
+		if len(jpegs) > 0 {
+			fmt.Println("-s only for use when comparing cd.gz files")
+			os.Exit(1)
+		}
+	}
+
+	err := scanJpegs(s, jpegs)
 	if err != nil {
 		fmt.Println("Error processing images:", err)
 		os.Exit(1)
 	}
 
-	err = scanDataFiles(dataFiles)
+	err = scanDataFiles(s, dataFiles)
 	if err != nil {
 		fmt.Println("Error processing data files:", err)
 		os.Exit(1)
@@ -185,9 +203,9 @@ func validateCD(cd imageInfo) error {
 func checkArgs(args []string) ([]string, []string) {
 	var jpegs []string
 	var cdfiles []string
-	for _, arg := range args[1:] {
+	for _, arg := range args {
 		if _, err := os.Stat(arg); os.IsNotExist(err) {
-			fmt.Printf("no such file or directory: %s", arg)
+			fmt.Printf("no such file or directory: %s\n", arg)
 			os.Exit(1)
 		}
 		switch {
@@ -214,27 +232,39 @@ func checkArgs(args []string) ([]string, []string) {
 	return jpegs, cdfiles
 }
 
-func scanDataFiles(dataFiles []string) error {
+func scanDataFiles(s status, dataFiles []string) error {
+
+	var sImage imageInfo
+	var err error
+	if s.SFile != "" {
+		sImage, err = scanImageData(s.SFile)
+		if err != nil {
+			fmt.Println("Error scanning reference image data: ", err)
+			os.Exit(1)
+		}
+	}
 
 	var images []imageInfo
 	for _, dataFile := range dataFiles {
-		data, err := ReadGzFile(dataFile)
+		image, err := scanImageData(dataFile)
 		if err != nil {
-			fmt.Println("Error unziping", dataFile, ":", err)
-		}
-		var image imageInfo
-		err = json.Unmarshal(data, &image)
-		if err != nil {
-			fmt.Println("Cannot process json from", dataFile, ":", err)
+			fmt.Println("Error scanning image data: ", err)
 			continue
 		}
-		image.Path = "\"" + image.Name + "\""
-		imagefile := strings.TrimSuffix(dataFile, ".cd.gz")
-		_, err = os.Stat(imagefile)
-		if err == nil {
-			image.Path = imagefile
-		}
 		images = append(images, image)
+	}
+
+	if s.SFile != "" {
+		matched := ""
+		for _, image := range images {
+			diffAvg := compareColors(sImage, image)
+			matched = ""
+			if diffAvg < float64(matchThresh) {
+				matched = "MATCH"
+			}
+			fmt.Printf("%04f: %s %s %s\n", diffAvg, matched, sImage.Path, image.Path)
+		}
+		return nil
 	}
 
 	/* compare each file to the others */
@@ -256,7 +286,7 @@ func scanDataFiles(dataFiles []string) error {
 	return nil
 }
 
-func scanJpegs(jpegs []string) error {
+func scanJpegs(s status, jpegs []string) error {
 
 	imagick.Initialize()
 	defer imagick.Terminate()
@@ -323,4 +353,26 @@ func compareColors(imageA, imageB imageInfo) float64 {
 	}
 	diffAvg = float64(diffSum) / float64(len(imageA.Cdata))
 	return diffAvg
+}
+
+func scanImageData(dataFile string) (imageInfo, error) {
+	var image imageInfo
+	var err error
+	data, err := ReadGzFile(dataFile)
+	if err != nil {
+		fmt.Println("Error unziping", dataFile, ":", err)
+		return image, err
+	}
+	err = json.Unmarshal(data, &image)
+	if err != nil {
+		fmt.Println("Cannot process json from", dataFile, ":", err)
+		return image, err
+	}
+	image.Path = "\"" + image.Name + "\""
+	imagefile := strings.TrimSuffix(dataFile, ".cd.gz")
+	_, err = os.Stat(imagefile)
+	if err == nil {
+		image.Path = imagefile
+	}
+	return image, nil
 }
