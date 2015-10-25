@@ -55,7 +55,7 @@ const (
 	VSlices     = 32
 	HReSize     = 128
 	VReSize     = 128
-	matchThresh = 10
+	matchThresh = 40
 )
 
 func main() {
@@ -274,14 +274,17 @@ func scanDataFiles(s status, dataFiles []string) error {
 	}
 
 	if s.SFile != "" {
-		matched := ""
+		// matched := ""
 		for _, image := range images {
 			diffAvg := checkem(compareColors(sImage, image))
-			matched = ""
-			if diffAvg < float64(matchThresh) {
-				matched = "MATCH"
-			}
-			fmt.Printf("%04f: %s %s %s\n", diffAvg, matched, sImage.Path, image.Path)
+			/*
+				matched = ""
+				if diffAvg < float64(matchThresh) {
+					matched = "MATCH"
+				}
+				fmt.Printf("%04f: %s %s %s\n", diffAvg, matched, sImage.Path, image.Path)
+			*/
+			fmt.Printf("%04f: %s %s\n", diffAvg, sImage.Path, image.Path)
 		}
 		return nil
 	}
@@ -293,7 +296,12 @@ func scanDataFiles(s status, dataFiles []string) error {
 			break
 		}
 		for _, cimage := range images[k+1:] {
-			/* red green blue */
+			/* simple */
+			// diffAvgS := compareColorsSimple(image, cimage)
+			// fmt.Println("Simple match:", diffAvgS)
+			/* prism */
+			// compareColorsPrismd(image, cimage)
+			/* red green blue std deviations*/
 			diffAvg := checkem(compareColors(image, cimage))
 			matched := ""
 			if diffAvg < float64(matchThresh) {
@@ -402,7 +410,49 @@ func compareColors(imageA, imageB imageInfo) (diffInfo, diffInfo, diffInfo) {
 	diffBlue.Avg = getMean(diffBlues)
 	diffBlue.StdDev = getStdDev(diffBlues, diffBlue.Avg)
 	// diffAvg = float64(diffSum) / float64(len(imageA.Cdata))
+	// fmt.Println("stdavgs:", diffRed.Avg, diffGreen.Avg, diffBlue.Avg)
+	// fmt.Println("stddevs:", diffRed.StdDev, diffGreen.StdDev, diffBlue.StdDev)
 	return diffRed, diffGreen, diffBlue
+}
+
+func compareColorsSimple(imageA, imageB imageInfo) float64 {
+	diffSum := 0
+	var diffAvg float64
+	for k, _ := range imageA.Cdata {
+		diffSum += int(difference(imageA.Cdata[k], imageB.Cdata[k]))
+	}
+	diffAvg = float64(diffSum) / float64(len(imageA.Cdata))
+	return diffAvg
+}
+
+func compareColorsPrismd(imageA, imageB imageInfo) float64 {
+	var diffRed, diffGreen, diffBlue int
+	/* cycle = red, green, blue */
+	cycle := 0
+	var diff int
+	for k, _ := range imageA.Cdata {
+		// cellA = float64(imageA.Cdata[k])
+		// cellB = float64(imageB.Cdata[k])
+		diff = int(difference(imageA.Cdata[k], imageB.Cdata[k]))
+		switch {
+		case cycle == 0:
+			diffRed += diff
+		case cycle == 1:
+			diffGreen += diff
+		case cycle == 2:
+			diffBlue += diff
+		}
+		cycle++
+		if cycle > 2 {
+			cycle = 0
+		}
+	}
+	dataLen := float64(len(imageA.Cdata)) / 3.0
+	diffAvgRed := float64(diffRed) / dataLen
+	diffAvgGreen := float64(diffGreen) / dataLen
+	diffAvgBlue := float64(diffBlue) / dataLen
+	fmt.Println("prism:", diffAvgRed, diffAvgGreen, diffAvgBlue)
+	return 0.0
 }
 
 /* https://github.com/ae6rt/golang-examples/blob/master/goeg/src/statistics_ans/statistics.go */
@@ -451,7 +501,9 @@ func scanImageData(dataFile string) (imageInfo, error) {
 func checkem(diffRed, diffGreen, diffBlue diffInfo) float64 {
 	// fmt.Printf("%04f, %04f, %04f\n", diffRed.Avg, diffGreen.Avg, diffBlue.Avg)
 	/* trying to match */
-	// fmt.Printf("%04f, %04f, %04f\n", math.Abs(diffRed.Avg), math.Abs(diffGreen.Avg), math.Abs(diffBlue.Avg))
-	matchSum := math.Abs(diffRed.Avg) + math.Abs(diffGreen.Avg) + math.Abs(diffBlue.Avg)
+	// matchSum := math.Abs(diffRed.Avg) + math.Abs(diffGreen.Avg) + math.Abs(diffBlue.Avg)
+	fmt.Printf("avg: %04f, %04f, %04f\n", math.Abs(diffRed.Avg), math.Abs(diffGreen.Avg), math.Abs(diffBlue.Avg))
+	fmt.Printf("std: %04f, %04f, %04f\n", math.Abs(diffRed.StdDev), math.Abs(diffGreen.StdDev), math.Abs(diffBlue.StdDev))
+	matchSum := math.Abs(diffRed.StdDev) + math.Abs(diffGreen.StdDev) + math.Abs(diffBlue.StdDev)
 	return matchSum / 3.0
 }
