@@ -317,7 +317,7 @@ func scanJpegs(s status, jpegs []string) error {
 
 		err := validateCD(colorData)
 		if err != nil {
-			os.Stderr.WriteString(fmt.Sprintf("Error validating generated data: %q", err))
+			os.Stderr.WriteString(fmt.Sprintf("Error validating generated data: %q\n", err))
 			continue
 		}
 
@@ -325,7 +325,7 @@ func scanJpegs(s status, jpegs []string) error {
 
 		j, err := json.Marshal(colorData)
 		if err != nil {
-			os.Stderr.WriteString(fmt.Sprintf("Error: %q", err))
+			os.Stderr.WriteString(fmt.Sprintf("Error: %q\n", err))
 			continue
 		}
 
@@ -335,7 +335,7 @@ func scanJpegs(s status, jpegs []string) error {
 		w.Close()
 		err = ioutil.WriteFile(outfile, b.Bytes(), 0644)
 		if err != nil {
-			os.Stderr.WriteString(fmt.Sprintf("Error writing to %s: %q", outfile, err))
+			os.Stderr.WriteString(fmt.Sprintf("Error writing to %s: %q\n", outfile, err))
 			continue
 		}
 
@@ -526,7 +526,7 @@ func showMatch(s status, imageA, imageB imageInfo) {
 
 	matched := false
 	var matchstring string
-	if pDiff >= float64(s.Thresh) {
+	if pDiff <= float64(s.Thresh) {
 		matched = true
 		matchstring = "MATCH"
 	}
@@ -539,7 +539,7 @@ func showMatch(s status, imageA, imageB imageInfo) {
 		return
 	}
 
-	fmt.Printf("%04f %s stddev %s %s\n", pDiff, matchstring, imageA.Path, imageB.Path)
+	fmt.Printf("%04f %s %s %s\n", pDiff, matchstring, imageA.Path, imageB.Path)
 	return
 
 }
