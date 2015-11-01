@@ -150,6 +150,9 @@ func getColorData(file string) imageInfo {
 
 	fmt.Println("reading color data for ", file)
 
+	imagick.Initialize()
+	defer imagick.Terminate()
+
 	mw := imagick.NewMagickWand()
 	defer mw.Destroy()
 
@@ -210,6 +213,7 @@ func getColorData(file string) imageInfo {
 	}
 
 	mw.Destroy()
+	imagick.Terminate()
 	return colorData
 }
 
@@ -306,9 +310,6 @@ func scanDataFiles(s status, dataFiles []string) error {
 }
 
 func scanJpegs(s status, jpegs []string) error {
-
-	imagick.Initialize()
-	defer imagick.Terminate()
 
 	for _, arg := range jpegs {
 
