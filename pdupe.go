@@ -43,11 +43,14 @@ type imageInfo struct {
 }
 
 type status struct {
-	RFile   string
-	CSimple bool
-	CPrism  bool
-	CStdDev bool
+	Comp   int // 0 = simple, 1 = prism, 2 = stddev
+	Thresh int
+	// CSimple bool
+	// CPrism  bool
+	// CStdDev bool
 	Verbose bool
+	MOnly   bool
+	RFile   string
 }
 type diffInfo struct {
 	Avg    float64
@@ -55,11 +58,13 @@ type diffInfo struct {
 }
 
 const (
-	HSlices     = 32
-	VSlices     = 32
-	HReSize     = 128
-	VReSize     = 128
-	matchThresh = 40
+	HSlices      = 32
+	VSlices      = 32
+	HReSize      = 128
+	VReSize      = 128
+	simpleThresh = 10
+	prismThresh  = 10
+	stdDevThresh = 15
 )
 
 func main() {
@@ -67,22 +72,22 @@ func main() {
 	var s status
 
 	reference_file := flag.String("r", "", "compare against reference file")
-	comp_simple := flag.Bool("s", true, "simple comparison")
-	comp_prism := flag.Bool("p", false, "prism comparison")
-	comp_stddev := flag.Bool("sd", false, "stddev comparison")
+	comp_type := flag.String("c", "s", "s=simple, p=prism, d=stddev")
+	threshold := flag.Int("t", 10, "compare type (10=default for simple)")
+	matches_only := flag.Bool("m", false, "print only matches")
 	verbose := flag.Bool("v", false, "verbose")
 	flag.Parse()
 
 	s.RFile = *reference_file
-	s.CSimple = *comp_simple
-	s.CPrism = *comp_prism
-	s.CStdDev = *comp_stddev
 	s.Verbose = *verbose
+	s.MOnly = *matches_only
+	s.Comp = checkCompType(*comp_type)
+	s.Thresh = *threshold
 
 	jpegs, dataFiles := checkArgs(flag.Args())
 
-	if s.RFile != "" {
-		if len(jpegs) > 0 {
+	if len(jpegs) > 0 {
+		if s.RFile != "" {
 			fmt.Println("-s only for use when comparing cd.gz files")
 			os.Exit(1)
 		}
@@ -232,8 +237,6 @@ func checkArgs(args []string) ([]string, []string) {
 	for _, arg := range args {
 		if _, err := os.Stat(arg); os.IsNotExist(err) {
 			os.Stderr.WriteString(fmt.Sprintf("No such file: %s\n", arg))
-			// fmt.Printf("no such file or directory: %s\n", arg)
-			// os.Exit(1)
 			continue
 		}
 		switch {
@@ -243,8 +246,6 @@ func checkArgs(args []string) ([]string, []string) {
 			cdfiles = append(cdfiles, arg)
 		default:
 			os.Stderr.WriteString(fmt.Sprintf("Cannot process unrecognized file type: %s\n", arg))
-			// fmt.Println("Cannot process unrecognized file type", arg)
-			// os.Exit(1)
 			continue
 		}
 	}
@@ -270,8 +271,7 @@ func scanDataFiles(s status, dataFiles []string) error {
 		sImage, err = scanImageData(s.RFile)
 		if err != nil {
 			os.Stderr.WriteString(fmt.Sprintf("Error scanning reference image data: ", err))
-			// fmt.Println("Error scanning reference image data: ", err)
-			//os.Exit(1)
+			os.Exit(1)
 		}
 	}
 
@@ -280,8 +280,7 @@ func scanDataFiles(s status, dataFiles []string) error {
 		image, err := scanImageData(dataFile)
 		if err != nil {
 			os.Stderr.WriteString(fmt.Sprintf("Error scanning image data: ", err))
-			// fmt.Println("Error scanning image data: ", err)
-			// continue
+			continue
 		}
 		images = append(images, image)
 	}
@@ -318,7 +317,6 @@ func scanJpegs(s status, jpegs []string) error {
 		err := validateCD(colorData)
 		if err != nil {
 			os.Stderr.WriteString(fmt.Sprintf("Error validating generated data: %q", err))
-			// fmt.Println("Error validating generated data: ", err)
 			continue
 		}
 
@@ -327,7 +325,6 @@ func scanJpegs(s status, jpegs []string) error {
 		j, err := json.Marshal(colorData)
 		if err != nil {
 			os.Stderr.WriteString(fmt.Sprintf("Error: %q", err))
-			// fmt.Println("error:", err)
 			continue
 		}
 
@@ -337,7 +334,6 @@ func scanJpegs(s status, jpegs []string) error {
 		w.Close()
 		err = ioutil.WriteFile(outfile, b.Bytes(), 0644)
 		if err != nil {
-			// fmt.Println("Error writing to ", outfile, err)
 			os.Stderr.WriteString(fmt.Sprintf("Error writing to %s: %q", outfile, err))
 			continue
 		}
@@ -368,11 +364,10 @@ func ReadGzFile(filename string) ([]byte, error) {
 	return s, nil
 }
 
-func compareColorsStdDev(s status, imageA, imageB imageInfo) (float64, string) {
-	// diffSum := 0
-	// var diffAvg float64
-	var diffReds, diffGreens, diffBlues []float64
+func compareColorsStdDev(s status, imageA, imageB imageInfo) float64 {
+
 	/* cycle = red, green, blue */
+	var diffReds, diffGreens, diffBlues []float64
 	cycle := 0
 	var cellA float64
 	var cellB float64
@@ -392,6 +387,7 @@ func compareColorsStdDev(s status, imageA, imageB imageInfo) (float64, string) {
 			cycle = 0
 		}
 	}
+
 	var diffRed, diffGreen, diffBlue diffInfo
 	diffRed.Avg = getMean(diffReds)
 	diffRed.StdDev = getStdDev(diffReds, diffRed.Avg)
@@ -399,36 +395,27 @@ func compareColorsStdDev(s status, imageA, imageB imageInfo) (float64, string) {
 	diffGreen.StdDev = getStdDev(diffGreens, diffGreen.Avg)
 	diffBlue.Avg = getMean(diffBlues)
 	diffBlue.StdDev = getStdDev(diffBlues, diffBlue.Avg)
-	// diffAvg = float64(diffSum) / float64(len(imageA.Cdata))
-	// fmt.Println("stdavgs:", diffRed.Avg, diffGreen.Avg, diffBlue.Avg)
-	// fmt.Println("stddevs:", diffRed.StdDev, diffGreen.StdDev, diffBlue.StdDev)
 
-	// func checkem(s status, diffRed, diffGreen, diffBlue diffInfo) ( status, float64, string ) {
-	// fmt.Printf("%04f, %04f, %04f\n", diffRed.Avg, diffGreen.Avg, diffBlue.Avg)
-	/* trying to match */
-	// matchSum := math.Abs(diffRed.Avg) + math.Abs(diffGreen.Avg) + math.Abs(diffBlue.Avg)
 	if s.Verbose == true {
 		fmt.Printf("avg: %04f, %04f, %04f\n", math.Abs(diffRed.Avg), math.Abs(diffGreen.Avg), math.Abs(diffBlue.Avg))
 		fmt.Printf("std: %04f, %04f, %04f\n", math.Abs(diffRed.StdDev), math.Abs(diffGreen.StdDev), math.Abs(diffBlue.StdDev))
 	}
 	matchSum := math.Abs(diffRed.StdDev) + math.Abs(diffGreen.StdDev) + math.Abs(diffBlue.StdDev)
-	return (matchSum / 3.0), ""
-	// }
+	return (matchSum / 3.0)
 
-	// return diffRed, diffGreen, diffBlue
 }
 
-func compareColorsSimple(s status, imageA, imageB imageInfo) (float64, string) {
+func compareColorsSimple(s status, imageA, imageB imageInfo) float64 {
 	diffSum := 0
 	var diffAvg float64
 	for k, _ := range imageA.Cdata {
 		diffSum += int(difference(imageA.Cdata[k], imageB.Cdata[k]))
 	}
 	diffAvg = float64(diffSum) / float64(len(imageA.Cdata))
-	return diffAvg, ""
+	return diffAvg
 }
 
-func compareColorsPrismd(s status, imageA, imageB imageInfo) (float64, string) {
+func compareColorsPrismd(s status, imageA, imageB imageInfo) float64 {
 	var diffRed, diffGreen, diffBlue int
 	/* cycle = red, green, blue */
 	cycle := 0
@@ -457,7 +444,7 @@ func compareColorsPrismd(s status, imageA, imageB imageInfo) (float64, string) {
 	}
 	// This is identical to simple compare
 	diffAvg := (diffAvgRed + diffAvgGreen + diffAvgBlue) / 3.0
-	return diffAvg, ""
+	return diffAvg
 }
 
 /* https://github.com/ae6rt/golang-examples/blob/master/goeg/src/statistics_ans/statistics.go */
@@ -505,20 +492,78 @@ func scanImageData(dataFile string) (imageInfo, error) {
 
 func showMatch(s status, imageA, imageB imageInfo) {
 
-	if s.CSimple == true {
-		diffSmpl, matched := compareColorsSimple(s, imageA, imageB)
-		fmt.Printf("%04f simple %s %s %s\n", diffSmpl, matched, imageA.Path, imageB.Path)
+	/*
+		if s.CSimple == true {
+			diffSmpl := compareColorsSimple(s, imageA, imageB)
+			matched = ckThresh(diffSmpl, simpleThresh)
+			if s.MOnly == true {
+				fmt.Printf("%s %s\n", imageA.Path, imageB.Path)
+			} else {
+				fmt.Printf("%04f %s simple %s %s\n", diffSmpl, ckThresh(diffSmpl, simpleThresh), imageA.Path, imageB.Path)
+			}
+		}
+		if s.CPrism == true {
+			diffPrism := compareColorsPrismd(s, imageA, imageB)
+			fmt.Printf("%04f %s prism  %s %s\n", diffPrism, ckThresh(diffPrism, prismThresh), imageA.Path, imageB.Path)
+		}
+
+		if s.CStdDev == true {
+			diffStdDev := compareColorsStdDev(s, imageA, imageB)
+			fmt.Printf("%04f %s stddev %s %s\n", diffStdDev, ckThresh(diffStdDev, stdDevThresh), imageA.Path, imageB.Path)
+		}
+	*/
+
+	var pDiff float64
+	switch {
+	case s.Comp == 0:
+		pDiff = compareColorsSimple(s, imageA, imageB)
+	case s.Comp == 1:
+		pDiff = compareColorsPrismd(s, imageA, imageB)
+	case s.Comp == 2:
+		pDiff = compareColorsStdDev(s, imageA, imageB)
 	}
 
-	if s.CPrism == true {
-		diffPrism, matched := compareColorsPrismd(s, imageA, imageB)
-		fmt.Printf("%04f prism  %s %s %s\n", diffPrism, matched, imageA.Path, imageB.Path)
+	matched := false
+	var matchstring string
+	if pDiff >= float64(s.Thresh) {
+		matched = true
+		matchstring = "MATCH"
 	}
 
-	if s.CStdDev == true {
-		diffStdDev, matched := compareColorsStdDev(s, imageA, imageB)
-		fmt.Printf("%04f stddev %s %s %s\n", diffStdDev, matched, imageA.Path, imageB.Path)
+	if s.MOnly == true {
+		if matched == false {
+			return
+		}
+		fmt.Printf("%s\t%s", imageA.Path, imageB.Path)
+		return
 	}
 
+	fmt.Printf("%04f %s stddev %s %s\n", pDiff, matchstring, imageA.Path, imageB.Path)
 	return
+
+}
+
+/*
+func ckThresh( value float64, thresh int ) string {
+	if value <= float64(thresh) {
+		return "MATCH"
+	}
+	return ""
+}
+*/
+
+func checkCompType(ctype string) int {
+	// s=simple = 0, p=prism =1, d=stddev = 2
+	switch ctype {
+	case "s":
+		return 0
+	case "p":
+		return 1
+	case "d":
+		return 2
+	default:
+		fmt.Println("Error: compare type must be s, p, or d for simple, prism, or stddev")
+		os.Exit(1)
+	}
+	return 0
 }
