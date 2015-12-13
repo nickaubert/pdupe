@@ -535,7 +535,7 @@ func showMatch(s status, imageA, imageB imageInfo) {
 		if matched == false {
 			return
 		}
-		fmt.Printf("%s\t%s", imageA.Path, imageB.Path)
+		fmt.Printf("%s\t%s\n", imageA.Path, imageB.Path)
 		return
 	}
 
