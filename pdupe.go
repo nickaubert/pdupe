@@ -162,6 +162,37 @@ func getColorData(file string) imageInfo {
 		return colorData
 	}
 
+	orientation := mw.GetImageOrientation()
+	if orientation > 1 {
+		/* http://sylvana.net/jpegcrop/exif_orientation.html */
+		pw := imagick.NewPixelWand()
+		switch orientation {
+		case 2:
+			err = mw.FlopImage()
+		case 3:
+			err = mw.RotateImage(pw, 180.0)
+		case 4:
+			err = mw.FlipImage()
+		case 5:
+			if err := mw.FlipImage(); err != nil {
+				fmt.Println("Error: ", err)
+			}
+			err = mw.RotateImage(pw, 90.0)
+		case 6:
+			err = mw.RotateImage(pw, 90.0)
+		case 7:
+			if err := mw.FlipImage(); err != nil {
+				fmt.Println("Error: ", err)
+			}
+			err = mw.RotateImage(pw, 270.0)
+		case 8:
+			err = mw.RotateImage(pw, 270.0)
+		}
+		if err != nil {
+			fmt.Println("Error: ", err)
+		}
+	}
+
 	/* hm, maybe chop original image into pieces first, then resize those */
 	err = mw.ResizeImage(HReSize, VReSize, imagick.FILTER_GAUSSIAN, 0.1)
 	if err != nil {
