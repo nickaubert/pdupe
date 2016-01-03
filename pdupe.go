@@ -96,12 +96,13 @@ func main() {
 		}
 	}
 
-	err := scanJpegs(s, jpegs)
+	newDataFiles, err := scanJpegs(s, jpegs)
 	if err != nil {
 		fmt.Println("Error processing images:", err)
 		os.Exit(1)
 	}
 
+	dataFiles = append(dataFiles, newDataFiles...)
 	err = scanDataFiles(s, dataFiles)
 	if err != nil {
 		fmt.Println("Error processing data files:", err)
@@ -287,17 +288,26 @@ func checkArgs(args []string) ([]string, []string) {
 			continue
 		}
 	}
-	if len(jpegs) > 0 {
-		if len(cdfiles) > 0 {
-			fmt.Println("Cannot process photos and data files at the same time")
+	for _, jpg := range jpegs {
+		cdfile := jpg + ".cd.gz"
+		_, err := os.Stat(cdfile)
+		if err == nil {
+			cdfiles = append(cdfiles, cdfile)
+		}
+	}
+	/*
+		if len(jpegs) > 0 {
+			if len(cdfiles) > 0 {
+				fmt.Println("Cannot process photos and data files at the same time")
+				os.Exit(1)
+			}
+			return jpegs, cdfiles
+		}
+		if len(cdfiles) == 0 {
+			fmt.Println("Must select files to process")
 			os.Exit(1)
 		}
-		return jpegs, cdfiles
-	}
-	if len(cdfiles) == 0 {
-		fmt.Println("Must select files to process")
-		os.Exit(1)
-	}
+	*/
 	return jpegs, cdfiles
 }
 
@@ -343,13 +353,15 @@ func scanDataFiles(s status, dataFiles []string) error {
 	return nil
 }
 
-func scanJpegs(s status, jpegs []string) error {
+func scanJpegs(s status, jpegs []string) ([]string, error) {
+
+	var newDataFiles []string
 
 	for _, arg := range jpegs {
 
 		outfile := arg + ".cd.gz"
 
-		// if not set to overwrite, test if data file already exists
+		/* if not set to overwrite, test if data file already exists */
 		if s.OvrWr != true {
 			_, err := os.Stat(outfile)
 			if err == nil {
@@ -384,9 +396,12 @@ func scanJpegs(s status, jpegs []string) error {
 			continue
 		}
 
+		// TESTING
+		newDataFiles = append(newDataFiles, outfile)
+
 	}
 
-	return nil
+	return newDataFiles, nil
 }
 
 /* http://stackoverflow.com/questions/16890648/how-can-i-use-golangs-compress-gzip-package-to-gzip-a-file */
