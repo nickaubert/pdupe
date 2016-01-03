@@ -50,6 +50,7 @@ type status struct {
 	// CStdDev bool
 	Verbose bool
 	MOnly   bool
+	OvrWr   bool
 	RFile   string
 }
 type diffInfo struct {
@@ -75,6 +76,7 @@ func main() {
 	comp_type := flag.String("c", "s", "s=simple, p=prism, d=stddev")
 	threshold := flag.Int("t", 10, "compare type (10=default for simple)")
 	matches_only := flag.Bool("m", false, "print only matches")
+	overwrite := flag.Bool("o", false, "overwrite cd.gz files")
 	verbose := flag.Bool("v", false, "verbose")
 	flag.Parse()
 
@@ -82,6 +84,7 @@ func main() {
 	s.Verbose = *verbose
 	s.MOnly = *matches_only
 	s.Comp = checkCompType(*comp_type)
+	s.OvrWr = *overwrite
 	s.Thresh = *threshold
 
 	jpegs, dataFiles := checkArgs(flag.Args())
@@ -344,6 +347,19 @@ func scanJpegs(s status, jpegs []string) error {
 
 	for _, arg := range jpegs {
 
+		outfile := arg + ".cd.gz"
+
+		// if not set to overwrite, test if data file already exists
+		if s.OvrWr != true {
+			_, err := os.Stat(outfile)
+			if err == nil {
+				if s.Verbose == true {
+					fmt.Printf("Skipping existing data file for %s\n", arg)
+				}
+				continue
+			}
+		}
+
 		colorData := getColorData(arg)
 
 		err := validateCD(colorData)
@@ -351,8 +367,6 @@ func scanJpegs(s status, jpegs []string) error {
 			os.Stderr.WriteString(fmt.Sprintf("Error validating generated data: %q\n", err))
 			continue
 		}
-
-		outfile := arg + ".cd.gz"
 
 		j, err := json.Marshal(colorData)
 		if err != nil {
