@@ -75,7 +75,7 @@ func main() {
 	reference_file := flag.String("r", "", "compare against reference file")
 	comp_type := flag.String("c", "s", "s=simple, p=prism, d=stddev")
 	threshold := flag.Int("t", 10, "compare type (10=default for simple)")
-	matches_only := flag.Bool("m", false, "print only matches")
+	matches_only := flag.Bool("m", true, "print only matches")
 	overwrite := flag.Bool("o", false, "overwrite cd.gz files")
 	verbose := flag.Bool("v", false, "verbose")
 	flag.Parse()
