@@ -103,6 +103,7 @@ func main() {
 	}
 
 	dataFiles = append(dataFiles, newDataFiles...)
+	dataFiles = dedupe(dataFiles)
 	err = scanDataFiles(s, dataFiles)
 	if err != nil {
 		fmt.Println("Error processing data files:", err)
@@ -274,20 +275,31 @@ func checkArgs(args []string) ([]string, []string) {
 	var jpegs []string
 	var cdfiles []string
 	for _, arg := range args {
-		if _, err := os.Stat(arg); os.IsNotExist(err) {
+		fi, err := os.Stat(arg)
+		if os.IsNotExist(err) {
 			os.Stderr.WriteString(fmt.Sprintf("No such file: %s\n", arg))
 			continue
 		}
-		switch {
-		case strings.HasSuffix(arg, ".jpg"):
-			jpegs = append(jpegs, arg)
-		case strings.HasSuffix(arg, ".cd.gz"):
-			cdfiles = append(cdfiles, arg)
-		default:
-			os.Stderr.WriteString(fmt.Sprintf("Cannot process unrecognized file type: %s\n", arg))
+		if fi.IsDir() == true {
+			newJpegs, newCdFiles := scanRecusive(arg)
+			jpegs = append(jpegs, newJpegs...)
+			cdfiles = append(cdfiles, newCdFiles...)
 			continue
 		}
+		if fi.Mode().IsRegular() == true {
+			switch {
+			case strings.HasSuffix(arg, ".jpg"):
+				jpegs = append(jpegs, arg)
+			case strings.HasSuffix(arg, ".cd.gz"):
+				cdfiles = append(cdfiles, arg)
+			default:
+				os.Stderr.WriteString(fmt.Sprintf("Cannot process unrecognized file type: %s\n", arg))
+			}
+			continue
+		}
+		os.Stderr.WriteString(fmt.Sprintf("Skipping non-regular file: %s\n", arg))
 	}
+	jpegs = dedupe(jpegs)
 	for _, jpg := range jpegs {
 		cdfile := jpg + ".cd.gz"
 		_, err := os.Stat(cdfile)
@@ -295,19 +307,6 @@ func checkArgs(args []string) ([]string, []string) {
 			cdfiles = append(cdfiles, cdfile)
 		}
 	}
-	/*
-		if len(jpegs) > 0 {
-			if len(cdfiles) > 0 {
-				fmt.Println("Cannot process photos and data files at the same time")
-				os.Exit(1)
-			}
-			return jpegs, cdfiles
-		}
-		if len(cdfiles) == 0 {
-			fmt.Println("Must select files to process")
-			os.Exit(1)
-		}
-	*/
 	return jpegs, cdfiles
 }
 
@@ -364,7 +363,7 @@ func scanJpegs(s status, jpegs []string) ([]string, error) {
 		/* if not set to overwrite, test if data file already exists */
 		if s.OvrWr != true {
 			_, err := os.Stat(outfile)
-			if err == nil {
+			if !os.IsNotExist(err) {
 				if s.Verbose == true {
 					fmt.Printf("Skipping existing data file for %s\n", arg)
 				}
@@ -396,7 +395,6 @@ func scanJpegs(s status, jpegs []string) ([]string, error) {
 			continue
 		}
 
-		// TESTING
 		newDataFiles = append(newDataFiles, outfile)
 
 	}
@@ -627,4 +625,51 @@ func checkCompType(ctype string) int {
 		os.Exit(1)
 	}
 	return 0
+}
+
+func scanRecusive(dir string) ([]string, []string) {
+	var jpegs []string
+	var cddata []string
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		os.Stderr.WriteString(fmt.Sprintf("Error reading dir %s: %q\n", dir, err))
+		return jpegs, cddata
+	}
+	for _, fi := range files {
+		/*
+			fi, err := os.Stat(file.Name())
+			if err != nil {
+				os.Stderr.WriteString(fmt.Sprintf("Error reading file %s: %q\n", file, err))
+				continue
+			}
+		*/
+		fpath := dir + "/" + fi.Name()
+		if fi.IsDir() == true {
+			newJpegs, newCdData := scanRecusive(fpath)
+			jpegs = append(jpegs, newJpegs...)
+			cddata = append(cddata, newCdData...)
+			continue
+		}
+		if fi.Mode().IsRegular() == true {
+			switch {
+			case strings.HasSuffix(fi.Name(), ".jpg"):
+				jpegs = append(jpegs, fpath)
+			case strings.HasSuffix(fi.Name(), ".cd.gz"):
+				cddata = append(cddata, fpath)
+			}
+		}
+	}
+	return jpegs, cddata
+}
+
+func dedupe(myarray []string) []string {
+	mymap := make(map[string]int)
+	var newarray []string
+	for _, n := range myarray {
+		mymap[n] = 1
+	}
+	for m, _ := range mymap {
+		newarray = append(newarray, m)
+	}
+	return newarray
 }
