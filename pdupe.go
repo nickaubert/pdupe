@@ -51,7 +51,6 @@ type status struct {
 	Verbose bool
 	MOnly   bool
 	OvrWr   bool
-	RFile   string
 }
 type diffInfo struct {
 	Avg    float64
@@ -80,35 +79,55 @@ func main() {
 	verbose := flag.Bool("v", false, "verbose")
 	flag.Parse()
 
-	s.RFile = *reference_file
+	if len(flag.Args()) == 0 {
+		fmt.Println("Error: must give file path as argument")
+	}
+
 	s.Verbose = *verbose
 	s.MOnly = *matches_only
 	s.Comp = checkCompType(*comp_type)
 	s.OvrWr = *overwrite
 	s.Thresh = *threshold
 
-	jpegs, dataFiles := checkArgs(flag.Args())
+	var refImgsData []imageInfo
+	if len(*reference_file) > 0 {
 
-	if len(jpegs) > 0 {
-		if s.RFile != "" {
-			fmt.Println("-s only for use when comparing cd.gz files")
+		refPath := make([]string, 1)
+		refPath[0] = *reference_file
+		rjpegs, rDataFiles := checkFiles(refPath)
+
+		newRJpegs, err := scanJpegs(s, rjpegs)
+		if err != nil {
+			fmt.Println("Error processing reference images:", err)
+			os.Exit(1)
+		}
+		rDataFiles = append(rDataFiles, newRJpegs...)
+		rDataFiles = dedupe(rDataFiles)
+
+		refImgsData, err = scanDataFiles(s, rDataFiles)
+		if err != nil {
+			fmt.Println("Error processing reference data files:", err)
 			os.Exit(1)
 		}
 	}
+
+	jpegs, dataFiles := checkFiles(flag.Args())
 
 	newDataFiles, err := scanJpegs(s, jpegs)
 	if err != nil {
 		fmt.Println("Error processing images:", err)
 		os.Exit(1)
 	}
-
 	dataFiles = append(dataFiles, newDataFiles...)
 	dataFiles = dedupe(dataFiles)
-	err = scanDataFiles(s, dataFiles)
+
+	imgsData, err := scanDataFiles(s, dataFiles)
 	if err != nil {
 		fmt.Println("Error processing data files:", err)
 		os.Exit(1)
 	}
+
+	compareImages(s, imgsData, refImgsData)
 
 }
 
@@ -125,7 +144,7 @@ func Divide(num float64, denom uint) (newVal uint) {
 	return uint(rounded)
 }
 
-/* not entirely sure color channels work this way, but don't see anything more reliable*/
+/* not entirely sure color channels work this way, but don't see anything more reliable */
 func make8bit(fullColor float64, depth uint) uint8 {
 	var flatColor uint8
 	o := float64(depth - 8)
@@ -271,9 +290,11 @@ func validateCD(cd imageInfo) error {
 	return nil
 }
 
-func checkArgs(args []string) ([]string, []string) {
+func checkFiles(args []string) ([]string, []string) {
+
 	var jpegs []string
 	var cdfiles []string
+
 	for _, arg := range args {
 		fi, err := os.Stat(arg)
 		if os.IsNotExist(err) {
@@ -281,6 +302,9 @@ func checkArgs(args []string) ([]string, []string) {
 			continue
 		}
 		if fi.IsDir() == true {
+			if strings.HasPrefix(fi.Name(), ".") == true {
+				continue
+			}
 			newJpegs, newCdFiles := scanRecusive(arg)
 			jpegs = append(jpegs, newJpegs...)
 			cdfiles = append(cdfiles, newCdFiles...)
@@ -302,25 +326,14 @@ func checkArgs(args []string) ([]string, []string) {
 	jpegs = dedupe(jpegs)
 	for _, jpg := range jpegs {
 		cdfile := jpg + ".cd.gz"
-		_, err := os.Stat(cdfile)
-		if err == nil {
+		if checkFile(cdfile) == true {
 			cdfiles = append(cdfiles, cdfile)
 		}
 	}
 	return jpegs, cdfiles
 }
 
-func scanDataFiles(s status, dataFiles []string) error {
-
-	var sImage imageInfo
-	var err error
-	if s.RFile != "" {
-		sImage, err = scanImageData(s.RFile)
-		if err != nil {
-			os.Stderr.WriteString(fmt.Sprintf("Error scanning reference image data: ", err))
-			os.Exit(1)
-		}
-	}
+func scanDataFiles(s status, dataFiles []string) ([]imageInfo, error) {
 
 	var images []imageInfo
 	for _, dataFile := range dataFiles {
@@ -332,11 +345,20 @@ func scanDataFiles(s status, dataFiles []string) error {
 		images = append(images, image)
 	}
 
-	if s.RFile != "" {
-		for _, image := range images {
-			showMatch(s, sImage, image)
+	return images, nil
+
+}
+
+func compareImages(s status, images, refImages []imageInfo) {
+
+	/* compare images against reference images */
+	if len(refImages) > 0 {
+		for _, rImage := range refImages {
+			for _, image := range images {
+				showMatch(s, rImage, image)
+			}
 		}
-		return nil
+		return
 	}
 
 	/* compare each file to the others */
@@ -349,7 +371,7 @@ func scanDataFiles(s status, dataFiles []string) error {
 		}
 	}
 
-	return nil
+	return
 }
 
 func scanJpegs(s status, jpegs []string) ([]string, error) {
@@ -362,8 +384,7 @@ func scanJpegs(s status, jpegs []string) ([]string, error) {
 
 		/* if not set to overwrite, test if data file already exists */
 		if s.OvrWr != true {
-			_, err := os.Stat(outfile)
-			if !os.IsNotExist(err) {
+			if checkFile(outfile) == true {
 				if s.Verbose == true {
 					fmt.Printf("Skipping existing data file for %s\n", arg)
 				}
@@ -475,7 +496,9 @@ func compareColorsSimple(s status, imageA, imageB imageInfo) float64 {
 }
 
 func compareColorsPrismd(s status, imageA, imageB imageInfo) float64 {
+
 	var diffRed, diffGreen, diffBlue int
+
 	/* cycle = red, green, blue */
 	cycle := 0
 	var diff int
@@ -494,6 +517,7 @@ func compareColorsPrismd(s status, imageA, imageB imageInfo) float64 {
 			cycle = 0
 		}
 	}
+
 	dataLen := float64(len(imageA.Cdata)) / 3.0
 	diffAvgRed := float64(diffRed) / dataLen
 	diffAvgGreen := float64(diffGreen) / dataLen
@@ -501,7 +525,8 @@ func compareColorsPrismd(s status, imageA, imageB imageInfo) float64 {
 	if s.Verbose == true {
 		fmt.Println("prism:", diffAvgRed, diffAvgGreen, diffAvgBlue)
 	}
-	// This is identical to simple compare
+
+	/* this is identical to simple compare */
 	diffAvg := (diffAvgRed + diffAvgGreen + diffAvgBlue) / 3.0
 	return diffAvg
 }
@@ -542,8 +567,7 @@ func scanImageData(dataFile string) (imageInfo, error) {
 	}
 	image.Path = "\"" + image.Name + "\""
 	imagefile := strings.TrimSuffix(dataFile, ".cd.gz")
-	_, err = os.Stat(imagefile)
-	if err == nil {
+	if checkFile(imagefile) {
 		image.Path = imagefile
 	}
 	return image, nil
@@ -643,7 +667,11 @@ func scanRecusive(dir string) ([]string, []string) {
 				continue
 			}
 		*/
+		if strings.HasPrefix(fi.Name(), ".") == true {
+			continue
+		}
 		fpath := dir + "/" + fi.Name()
+		fpath = deslash(fpath)
 		if fi.IsDir() == true {
 			newJpegs, newCdData := scanRecusive(fpath)
 			jpegs = append(jpegs, newJpegs...)
@@ -672,4 +700,21 @@ func dedupe(myarray []string) []string {
 		newarray = append(newarray, m)
 	}
 	return newarray
+}
+
+func deslash(path string) string {
+	newpath := strings.Replace(path, "//", "/", -1)
+	if strings.Contains(newpath, "//") == true {
+		newpath = deslash(newpath)
+	}
+	return newpath
+}
+
+func checkFile(path string) bool {
+	_, err := os.Stat(path)
+	/* could use os.IsNotExist(err) */
+	if err != nil {
+		return false
+	}
+	return true
 }
