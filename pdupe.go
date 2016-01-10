@@ -29,6 +29,7 @@ import (
 	"io/ioutil"
 	"math"
 	"os"
+	"runtime"
 	"strings"
 )
 
@@ -45,6 +46,7 @@ type imageInfo struct {
 type status struct {
 	Comp   int // 0 = simple, 1 = prism, 2 = stddev
 	Thresh int
+	MaxPrc int
 	// CSimple bool
 	// CPrism  bool
 	// CStdDev bool
@@ -77,6 +79,7 @@ func main() {
 	matches_only := flag.Bool("m", true, "print only matches")
 	overwrite := flag.Bool("o", false, "overwrite cd.gz files")
 	verbose := flag.Bool("v", false, "verbose")
+	maxprocs := flag.Int("p", runtime.GOMAXPROCS(0), "max cpu procs")
 	flag.Parse()
 
 	if len(flag.Args()) == 0 {
@@ -88,6 +91,7 @@ func main() {
 	s.Comp = checkCompType(*comp_type)
 	s.OvrWr = *overwrite
 	s.Thresh = *threshold
+	s.MaxPrc = *maxprocs
 
 	var refImgsData []imageInfo
 	if len(*reference_file) > 0 {
@@ -96,36 +100,23 @@ func main() {
 		refPath[0] = *reference_file
 		rjpegs, rDataFiles := checkFiles(refPath)
 
-		newRJpegs, err := scanJpegs(s, rjpegs)
-		if err != nil {
-			fmt.Println("Error processing reference images:", err)
-			os.Exit(1)
-		}
+		newRJpegs := scanJpegs(s, rjpegs)
+
 		rDataFiles = append(rDataFiles, newRJpegs...)
 		rDataFiles = dedupe(rDataFiles)
 
-		refImgsData, err = scanDataFiles(s, rDataFiles)
-		if err != nil {
-			fmt.Println("Error processing reference data files:", err)
-			os.Exit(1)
-		}
+		refImgsData = scanDataFiles(s, rDataFiles)
+
 	}
 
 	jpegs, dataFiles := checkFiles(flag.Args())
 
-	newDataFiles, err := scanJpegs(s, jpegs)
-	if err != nil {
-		fmt.Println("Error processing images:", err)
-		os.Exit(1)
-	}
+	newDataFiles := scanJpegs(s, jpegs)
+
 	dataFiles = append(dataFiles, newDataFiles...)
 	dataFiles = dedupe(dataFiles)
 
-	imgsData, err := scanDataFiles(s, dataFiles)
-	if err != nil {
-		fmt.Println("Error processing data files:", err)
-		os.Exit(1)
-	}
+	imgsData := scanDataFiles(s, dataFiles)
 
 	compareImages(s, imgsData, refImgsData)
 
@@ -333,10 +324,13 @@ func checkFiles(args []string) ([]string, []string) {
 	return jpegs, cdfiles
 }
 
-func scanDataFiles(s status, dataFiles []string) ([]imageInfo, error) {
+func scanDataFiles(s status, dataFiles []string) []imageInfo {
 
 	var images []imageInfo
 	for _, dataFile := range dataFiles {
+		if dataFile == "" {
+			continue
+		}
 		image, err := scanImageData(dataFile)
 		if err != nil {
 			os.Stderr.WriteString(fmt.Sprintf("Error scanning image data: ", err))
@@ -345,7 +339,7 @@ func scanDataFiles(s status, dataFiles []string) ([]imageInfo, error) {
 		images = append(images, image)
 	}
 
-	return images, nil
+	return images
 
 }
 
@@ -374,53 +368,34 @@ func compareImages(s status, images, refImages []imageInfo) {
 	return
 }
 
-func scanJpegs(s status, jpegs []string) ([]string, error) {
+func scanJpegs(s status, jpegs []string) []string {
+
+	jdx := 0
+
+	chData := make(chan string)
+
+	/* fill queue with number of processors */
+	for i := 0; i < s.MaxPrc; i++ {
+		if i == len(jpegs) {
+			break
+		}
+		go processJpeg(chData, jpegs[jdx], s)
+		jdx++
+	}
 
 	var newDataFiles []string
 
-	for _, arg := range jpegs {
-
-		outfile := arg + ".cd.gz"
-
-		/* if not set to overwrite, test if data file already exists */
-		if s.OvrWr != true {
-			if checkFile(outfile) == true {
-				if s.Verbose == true {
-					fmt.Printf("Skipping existing data file for %s\n", arg)
-				}
-				continue
-			}
-		}
-
-		colorData := getColorData(arg)
-
-		err := validateCD(colorData)
-		if err != nil {
-			os.Stderr.WriteString(fmt.Sprintf("Error validating generated data: %q\n", err))
-			continue
-		}
-
-		j, err := json.Marshal(colorData)
-		if err != nil {
-			os.Stderr.WriteString(fmt.Sprintf("Error: %q\n", err))
-			continue
-		}
-
-		var b bytes.Buffer
-		w := gzip.NewWriter(&b)
-		w.Write(j)
-		w.Close()
-		err = ioutil.WriteFile(outfile, b.Bytes(), 0644)
-		if err != nil {
-			os.Stderr.WriteString(fmt.Sprintf("Error writing to %s: %q\n", outfile, err))
-			continue
-		}
-
-		newDataFiles = append(newDataFiles, outfile)
-
+	for ; jdx < len(jpegs); jdx++ {
+		newDataFiles = append(newDataFiles, <-chData)
+		go processJpeg(chData, jpegs[jdx], s)
 	}
 
-	return newDataFiles, nil
+	/* drain queue */
+	for len(newDataFiles) < len(jpegs) {
+		newDataFiles = append(newDataFiles, <-chData)
+	}
+
+	return newDataFiles
 }
 
 /* http://stackoverflow.com/questions/16890648/how-can-i-use-golangs-compress-gzip-package-to-gzip-a-file */
@@ -717,4 +692,55 @@ func checkFile(path string) bool {
 		return false
 	}
 	return true
+}
+
+func processJpeg(chData chan string, jpg string, s status) {
+
+	outfile := jpg + ".cd.gz"
+
+	/* if not set to overwrite, test if data file already exists */
+	if s.OvrWr != true {
+		if checkFile(outfile) == true {
+			if s.Verbose == true {
+				fmt.Printf("Skipping existing data file for %s\n", jpg)
+			}
+			// continue
+			chData <- ""
+			return
+		}
+	}
+
+	colorData := getColorData(jpg)
+
+	err := validateCD(colorData)
+	if err != nil {
+		os.Stderr.WriteString(fmt.Sprintf("Error validating generated data: %q\n", err))
+		// continue
+		chData <- ""
+		return
+	}
+
+	j, err := json.Marshal(colorData)
+	if err != nil {
+		os.Stderr.WriteString(fmt.Sprintf("Error: %q\n", err))
+		// continue
+		chData <- ""
+		return
+	}
+
+	var b bytes.Buffer
+	w := gzip.NewWriter(&b)
+	w.Write(j)
+	w.Close()
+	err = ioutil.WriteFile(outfile, b.Bytes(), 0644)
+	if err != nil {
+		os.Stderr.WriteString(fmt.Sprintf("Error writing to %s: %q\n", outfile, err))
+		// continue
+		chData <- ""
+		return
+	}
+
+	chData <- outfile
+	return
+
 }
