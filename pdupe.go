@@ -98,9 +98,9 @@ func main() {
 
 		refPath := make([]string, 1)
 		refPath[0] = *reference_file
-		rjpegs, rDataFiles := checkFiles(refPath)
+		rimages, rDataFiles := checkFiles(refPath)
 
-		newRJpegs := scanJpegs(s, rjpegs)
+		newRJpegs := scanJpegs(s, rimages)
 
 		rDataFiles = append(rDataFiles, newRJpegs...)
 		rDataFiles = dedupe(rDataFiles)
@@ -109,9 +109,9 @@ func main() {
 
 	}
 
-	jpegs, dataFiles := checkFiles(flag.Args())
+	images, dataFiles := checkFiles(flag.Args())
 
-	newDataFiles := scanJpegs(s, jpegs)
+	newDataFiles := scanJpegs(s, images)
 
 	dataFiles = append(dataFiles, newDataFiles...)
 	dataFiles = dedupe(dataFiles)
@@ -283,7 +283,7 @@ func validateCD(cd imageInfo) error {
 
 func checkFiles(args []string) ([]string, []string) {
 
-	var jpegs []string
+	var images []string
 	var cdfiles []string
 
 	for _, arg := range args {
@@ -297,14 +297,16 @@ func checkFiles(args []string) ([]string, []string) {
 				continue
 			}
 			newJpegs, newCdFiles := scanRecusive(arg)
-			jpegs = append(jpegs, newJpegs...)
+			images = append(images, newJpegs...)
 			cdfiles = append(cdfiles, newCdFiles...)
 			continue
 		}
 		if fi.Mode().IsRegular() == true {
 			switch {
 			case strings.HasSuffix(arg, ".jpg"):
-				jpegs = append(jpegs, arg)
+				images = append(images, arg)
+			case strings.HasSuffix(arg, ".png"):
+				images = append(images, arg)
 			case strings.HasSuffix(arg, ".cd.gz"):
 				cdfiles = append(cdfiles, arg)
 			default:
@@ -314,14 +316,14 @@ func checkFiles(args []string) ([]string, []string) {
 		}
 		os.Stderr.WriteString(fmt.Sprintf("Skipping non-regular file: %s\n", arg))
 	}
-	jpegs = dedupe(jpegs)
-	for _, jpg := range jpegs {
-		cdfile := jpg + ".cd.gz"
+	images = dedupe(images)
+	for _, img := range images {
+		cdfile := img + ".cd.gz"
 		if checkFile(cdfile) == true {
 			cdfiles = append(cdfiles, cdfile)
 		}
 	}
-	return jpegs, cdfiles
+	return images, cdfiles
 }
 
 func scanDataFiles(s status, dataFiles []string) []imageInfo {
@@ -368,7 +370,7 @@ func compareImages(s status, images, refImages []imageInfo) {
 	return
 }
 
-func scanJpegs(s status, jpegs []string) []string {
+func scanJpegs(s status, images []string) []string {
 
 	jdx := 0
 
@@ -376,22 +378,22 @@ func scanJpegs(s status, jpegs []string) []string {
 
 	/* fill queue with number of processors */
 	for i := 0; i < s.MaxPrc; i++ {
-		if i == len(jpegs) {
+		if i == len(images) {
 			break
 		}
-		go processJpeg(chData, jpegs[jdx], s)
+		go processJpeg(chData, images[jdx], s)
 		jdx++
 	}
 
 	var newDataFiles []string
 
-	for ; jdx < len(jpegs); jdx++ {
+	for ; jdx < len(images); jdx++ {
 		newDataFiles = append(newDataFiles, <-chData)
-		go processJpeg(chData, jpegs[jdx], s)
+		go processJpeg(chData, images[jdx], s)
 	}
 
 	/* drain queue */
-	for len(newDataFiles) < len(jpegs) {
+	for len(newDataFiles) < len(images) {
 		newDataFiles = append(newDataFiles, <-chData)
 	}
 
@@ -627,12 +629,12 @@ func checkCompType(ctype string) int {
 }
 
 func scanRecusive(dir string) ([]string, []string) {
-	var jpegs []string
+	var images []string
 	var cddata []string
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
 		os.Stderr.WriteString(fmt.Sprintf("Error reading dir %s: %q\n", dir, err))
-		return jpegs, cddata
+		return images, cddata
 	}
 	for _, fi := range files {
 		/*
@@ -649,20 +651,22 @@ func scanRecusive(dir string) ([]string, []string) {
 		fpath = deslash(fpath)
 		if fi.IsDir() == true {
 			newJpegs, newCdData := scanRecusive(fpath)
-			jpegs = append(jpegs, newJpegs...)
+			images = append(images, newJpegs...)
 			cddata = append(cddata, newCdData...)
 			continue
 		}
 		if fi.Mode().IsRegular() == true {
 			switch {
 			case strings.HasSuffix(fi.Name(), ".jpg"):
-				jpegs = append(jpegs, fpath)
+				images = append(images, fpath)
+			case strings.HasSuffix(fi.Name(), ".png"):
+				images = append(images, fpath)
 			case strings.HasSuffix(fi.Name(), ".cd.gz"):
 				cddata = append(cddata, fpath)
 			}
 		}
 	}
-	return jpegs, cddata
+	return images, cddata
 }
 
 func dedupe(myarray []string) []string {
@@ -694,15 +698,15 @@ func checkFile(path string) bool {
 	return true
 }
 
-func processJpeg(chData chan string, jpg string, s status) {
+func processJpeg(chData chan string, img string, s status) {
 
-	outfile := jpg + ".cd.gz"
+	outfile := img + ".cd.gz"
 
 	/* if not set to overwrite, test if data file already exists */
 	if s.OvrWr != true {
 		if checkFile(outfile) == true {
 			if s.Verbose == true {
-				fmt.Printf("Skipping existing data file for %s\n", jpg)
+				fmt.Printf("Skipping existing data file for %s\n", img)
 			}
 			// continue
 			chData <- ""
@@ -710,7 +714,7 @@ func processJpeg(chData chan string, jpg string, s status) {
 		}
 	}
 
-	colorData := getColorData(jpg)
+	colorData := getColorData(img)
 
 	err := validateCD(colorData)
 	if err != nil {
