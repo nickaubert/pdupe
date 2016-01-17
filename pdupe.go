@@ -50,8 +50,8 @@ type status struct {
 	// CSimple bool
 	// CPrism  bool
 	// CStdDev bool
+	GDOnly  bool
 	Verbose bool
-	MOnly   bool
 	OvrWr   bool
 }
 type diffInfo struct {
@@ -76,8 +76,8 @@ func main() {
 	reference_file := flag.String("r", "", "compare against reference file")
 	comp_type := flag.String("c", "s", "s=simple, p=prism, d=stddev")
 	threshold := flag.Int("t", 10, "compare type (10=default for simple)")
-	matches_only := flag.Bool("m", true, "print only matches")
 	overwrite := flag.Bool("o", false, "overwrite cd.gz files")
+	dataonly := flag.Bool("d", false, "generate .cd.gz files only (dont compare)")
 	verbose := flag.Bool("v", false, "verbose")
 	maxprocs := flag.Int("p", runtime.GOMAXPROCS(0), "max cpu procs")
 	flag.Parse()
@@ -87,11 +87,11 @@ func main() {
 	}
 
 	s.Verbose = *verbose
-	s.MOnly = *matches_only
 	s.Comp = checkCompType(*comp_type)
 	s.OvrWr = *overwrite
 	s.Thresh = *threshold
 	s.MaxPrc = *maxprocs
+	s.GDOnly = *dataonly
 
 	var refImgsData []imageInfo
 	if len(*reference_file) > 0 {
@@ -118,7 +118,9 @@ func main() {
 
 	imgsData := scanDataFiles(s, dataFiles)
 
-	compareImages(s, imgsData, refImgsData)
+	if s.GDOnly != true {
+		compareImages(s, imgsData, refImgsData)
+	}
 
 }
 
@@ -158,9 +160,10 @@ func diff64(a, b float64) float64 {
 	return b - a
 }
 
-func getColorData(file string) imageInfo {
+func getColorData(file string) (imageInfo, error) {
 
 	var colorData imageInfo
+	var err error
 	colorData.Name = file
 
 	fmt.Println("reading color data for ", file)
@@ -171,10 +174,10 @@ func getColorData(file string) imageInfo {
 	mw := imagick.NewMagickWand()
 	defer mw.Destroy()
 
-	err := mw.ReadImage(file)
+	err = mw.ReadImage(file)
 	if err != nil {
 		fmt.Println("Error: ", err)
-		return colorData
+		return colorData, err
 	}
 
 	orientation := mw.GetImageOrientation()
@@ -258,9 +261,9 @@ func getColorData(file string) imageInfo {
 		}
 	}
 
-	mw.Destroy()
-	imagick.Terminate()
-	return colorData
+	// mw.Destroy()
+	// imagick.Terminate()
+	return colorData, nil
 }
 
 func validateCD(cd imageInfo) error {
@@ -329,6 +332,11 @@ func checkFiles(args []string) ([]string, []string) {
 func scanDataFiles(s status, dataFiles []string) []imageInfo {
 
 	var images []imageInfo
+	/* dont compare image data */
+	if s.GDOnly == true {
+		return images
+	}
+
 	for _, dataFile := range dataFiles {
 		if dataFile == "" {
 			continue
@@ -556,7 +564,7 @@ func showMatch(s status, imageA, imageB imageInfo) {
 		if s.CSimple == true {
 			diffSmpl := compareColorsSimple(s, imageA, imageB)
 			matched = ckThresh(diffSmpl, simpleThresh)
-			if s.MOnly == true {
+			if s.Verbose != true {
 				fmt.Printf("%s %s\n", imageA.Path, imageB.Path)
 			} else {
 				fmt.Printf("%04f %s simple %s %s\n", diffSmpl, ckThresh(diffSmpl, simpleThresh), imageA.Path, imageB.Path)
@@ -590,7 +598,7 @@ func showMatch(s status, imageA, imageB imageInfo) {
 		matchstring = "MATCH"
 	}
 
-	if s.MOnly == true {
+	if s.Verbose != true {
 		if matched == false {
 			return
 		}
@@ -701,6 +709,8 @@ func checkFile(path string) bool {
 func processJpeg(chData chan string, img string, s status) {
 
 	outfile := img + ".cd.gz"
+	retfile := ""
+	defer func() { chData <- retfile }()
 
 	/* if not set to overwrite, test if data file already exists */
 	if s.OvrWr != true {
@@ -708,27 +718,25 @@ func processJpeg(chData chan string, img string, s status) {
 			if s.Verbose == true {
 				fmt.Printf("Skipping existing data file for %s\n", img)
 			}
-			// continue
-			chData <- ""
 			return
 		}
 	}
 
-	colorData := getColorData(img)
-
-	err := validateCD(colorData)
+	colorData, err := getColorData(img)
 	if err != nil {
-		os.Stderr.WriteString(fmt.Sprintf("Error validating generated data: %q\n", err))
-		// continue
-		chData <- ""
+		os.Stderr.WriteString(fmt.Sprintf("Error getting color data from %s: %q\n", img, err))
+		return
+	}
+
+	err = validateCD(colorData)
+	if err != nil {
+		os.Stderr.WriteString(fmt.Sprintf("Error validating generated data from %s: %q\n", img, err))
 		return
 	}
 
 	j, err := json.Marshal(colorData)
 	if err != nil {
-		os.Stderr.WriteString(fmt.Sprintf("Error: %q\n", err))
-		// continue
-		chData <- ""
+		os.Stderr.WriteString(fmt.Sprintf("Error marshalling data for %s: %q\n", img, err))
 		return
 	}
 
@@ -739,12 +747,25 @@ func processJpeg(chData chan string, img string, s status) {
 	err = ioutil.WriteFile(outfile, b.Bytes(), 0644)
 	if err != nil {
 		os.Stderr.WriteString(fmt.Sprintf("Error writing to %s: %q\n", outfile, err))
-		// continue
-		chData <- ""
 		return
 	}
 
-	chData <- outfile
+	retfile = outfile
 	return
 
 }
+
+/*
+func checkOptions( s status ) {
+
+	if s.GDOnly == true {
+		if s.MOnly == true {
+			fmt.Println("Error: options -m and -d are mutually exclusive")
+			os.Exit(1)
+		}
+	}
+
+	return
+
+}
+*/
