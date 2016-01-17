@@ -2,6 +2,7 @@ package main
 
 /*
  *  https://gowalker.org/github.com/gographics/imagick/imagick
+ *  crashing a lot, maybe switch to https://golang.org/pkg/image/
  *
  * Logic:
  *
@@ -38,6 +39,7 @@ import "github.com/gographics/imagick/imagick"
 // import imagick "github.com/rainycape/magick"
 
 type imageInfo struct {
+	Size  int64
 	Name  string
 	Path  string
 	Cdata []uint8
@@ -163,10 +165,15 @@ func diff64(a, b float64) float64 {
 func getColorData(file string) (imageInfo, error) {
 
 	var colorData imageInfo
-	var err error
 	colorData.Name = file
 
 	fmt.Println("reading color data for ", file)
+
+	fi, err := os.Stat(file)
+	if err != nil {
+		return colorData, err
+	}
+	colorData.Size = fi.Size()
 
 	imagick.Initialize()
 	defer imagick.Terminate()
@@ -176,7 +183,6 @@ func getColorData(file string) (imageInfo, error) {
 
 	err = mw.ReadImage(file)
 	if err != nil {
-		fmt.Println("Error: ", err)
 		return colorData, err
 	}
 
@@ -602,7 +608,11 @@ func showMatch(s status, imageA, imageB imageInfo) {
 		if matched == false {
 			return
 		}
-		fmt.Printf("%s %s\n", imageA.Path, imageB.Path)
+		if imageB.Size > imageA.Size {
+			fmt.Printf("%s %s\n", imageB.Path, imageA.Path)
+		} else {
+			fmt.Printf("%s %s\n", imageA.Path, imageB.Path)
+		}
 		return
 	}
 
@@ -621,7 +631,7 @@ func ckThresh( value float64, thresh int ) string {
 */
 
 func checkCompType(ctype string) int {
-	// s=simple = 0, p=prism =1, d=stddev = 2
+	/* s=simple = 0, p=prism =1, d=stddev = 2 */
 	switch ctype {
 	case "s":
 		return 0
@@ -754,18 +764,3 @@ func processJpeg(chData chan string, img string, s status) {
 	return
 
 }
-
-/*
-func checkOptions( s status ) {
-
-	if s.GDOnly == true {
-		if s.MOnly == true {
-			fmt.Println("Error: options -m and -d are mutually exclusive")
-			os.Exit(1)
-		}
-	}
-
-	return
-
-}
-*/
