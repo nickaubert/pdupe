@@ -244,7 +244,7 @@ func getColorData(file string) (imageInfo, error) {
 			gu8 := uint8(gavg >> 8)
 			bu8 := uint8(bavg >> 8)
 
-			fmt.Println("cell", vCell, hCell, ravg, ru8, gavg, gu8, bavg, bu8)
+			// fmt.Println("cell", vCell, hCell, ravg, ru8, gavg, gu8, bavg, bu8)
 
 			colorData.Cdata = append(colorData.Cdata, ru8, gu8, bu8)
 
@@ -262,12 +262,10 @@ func validateCD(cd imageInfo) error {
 	if gotLen != xpcLen {
 		return fmt.Errorf("Expect array length %d, got %d\n", xpcLen, gotLen)
 	}
-	fmt.Println("arraylen:", gotLen, xpcLen)
 	sum := uint32(0)
 	for _, i := range cd.Cdata {
 		sum += uint32(i)
 	}
-	fmt.Println("sum:", sum)
 	if sum == 0 {
 		return fmt.Errorf("No data in array\n")
 	}
