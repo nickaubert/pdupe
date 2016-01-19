@@ -73,6 +73,7 @@ const (
 	simpleThresh = 10
 	prismThresh  = 10
 	stdDevThresh = 15
+	suffix       = ".cz"
 )
 
 func main() {
@@ -82,8 +83,8 @@ func main() {
 	reference_file := flag.String("r", "", "compare against reference file")
 	comp_type := flag.String("c", "s", "s=simple, p=prism, d=stddev")
 	threshold := flag.Int("t", 10, "compare type (10=default for simple)")
-	overwrite := flag.Bool("o", false, "overwrite cd.gz files")
-	dataonly := flag.Bool("d", false, "generate .cd.gz files only (dont compare)")
+	overwrite := flag.Bool("o", false, fmt.Sprintf("overwrite %s filesa", suffix))
+	dataonly := flag.Bool("d", false, fmt.Sprintf("generate %s files only (dont compare)", suffix))
 	verbose := flag.Bool("v", false, "verbose")
 	maxprocs := flag.Int("p", runtime.GOMAXPROCS(0), "max cpu procs")
 	flag.Parse()
@@ -299,7 +300,7 @@ func checkFiles(args []string) ([]string, []string) {
 				images = append(images, arg)
 			case strings.HasSuffix(arg, ".png"):
 				images = append(images, arg)
-			case strings.HasSuffix(arg, ".cd.gz"):
+			case strings.HasSuffix(arg, suffix):
 				cdfiles = append(cdfiles, arg)
 			default:
 				os.Stderr.WriteString(fmt.Sprintf("Cannot process unrecognized file type: %s\n", arg))
@@ -310,7 +311,7 @@ func checkFiles(args []string) ([]string, []string) {
 	}
 	images = dedupe(images)
 	for _, img := range images {
-		cdfile := img + ".cd.gz"
+		cdfile := img + suffix
 		if checkFile(cdfile) == true {
 			cdfiles = append(cdfiles, cdfile)
 		}
@@ -540,7 +541,7 @@ func scanImageData(dataFile string) (imageInfo, error) {
 		return image, err
 	}
 	image.Path = "\"" + image.Name + "\""
-	imagefile := strings.TrimSuffix(dataFile, ".cd.gz")
+	imagefile := strings.TrimSuffix(dataFile, suffix)
 	if checkFile(imagefile) {
 		image.Path = imagefile
 	}
@@ -662,7 +663,7 @@ func scanRecusive(dir string) ([]string, []string) {
 				images = append(images, fpath)
 			case strings.HasSuffix(fi.Name(), ".png"):
 				images = append(images, fpath)
-			case strings.HasSuffix(fi.Name(), ".cd.gz"):
+			case strings.HasSuffix(fi.Name(), suffix):
 				cddata = append(cddata, fpath)
 			}
 		}
@@ -701,7 +702,7 @@ func checkFile(path string) bool {
 
 func processJpeg(chData chan string, img string, s status) {
 
-	outfile := img + ".cd.gz"
+	outfile := img + suffix
 	retfile := ""
 	defer func() { chData <- retfile }()
 
