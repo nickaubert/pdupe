@@ -2,7 +2,7 @@ package main
 
 /*
  *  https://gowalker.org/github.com/gographics/imagick/imagick
- *  crashing a lot, maybe switch to https://golang.org/pkg/image/
+ *  crashing a lot, switch to https://golang.org/pkg/image/
  *
  * Logic:
  *
@@ -24,18 +24,22 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	// "encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image"
 	"io/ioutil"
 	"math"
 	"os"
 	"runtime"
 	"strings"
+	// _ "image/gif"
+	// _ "image/png"
+	_ "image/jpeg"
 )
 
-import "github.com/gographics/imagick/imagick"
-
+// import "github.com/gographics/imagick/imagick"
 // import imagick "github.com/rainycape/magick"
 
 type imageInfo struct {
@@ -175,56 +179,23 @@ func getColorData(file string) (imageInfo, error) {
 	}
 	colorData.Size = fi.Size()
 
-	imagick.Initialize()
-	defer imagick.Terminate()
-
-	mw := imagick.NewMagickWand()
-	defer mw.Destroy()
-
-	err = mw.ReadImage(file)
+	reader, err := os.Open(file)
 	if err != nil {
 		return colorData, err
 	}
+	defer reader.Close()
 
-	orientation := mw.GetImageOrientation()
-	if orientation > 1 {
-		/* http://sylvana.net/jpegcrop/exif_orientation.html */
-		pw := imagick.NewPixelWand()
-		switch orientation {
-		case 2:
-			err = mw.FlopImage()
-		case 3:
-			err = mw.RotateImage(pw, 180.0)
-		case 4:
-			err = mw.FlipImage()
-		case 5:
-			if err := mw.FlipImage(); err != nil {
-				fmt.Println("Error: ", err)
-			}
-			err = mw.RotateImage(pw, 90.0)
-		case 6:
-			err = mw.RotateImage(pw, 90.0)
-		case 7:
-			if err := mw.FlipImage(); err != nil {
-				fmt.Println("Error: ", err)
-			}
-			err = mw.RotateImage(pw, 270.0)
-		case 8:
-			err = mw.RotateImage(pw, 270.0)
-		}
-		if err != nil {
-			fmt.Println("Error: ", err)
-		}
-	}
+	// TODO: orientation
 
 	/* hm, maybe chop original image into pieces first, then resize those */
-	err = mw.ResizeImage(HReSize, VReSize, imagick.FILTER_GAUSSIAN, 0.1)
-	if err != nil {
-		fmt.Println("resize error: ", err)
-	}
 
-	cellWidth := HReSize / HSlices
-	cellHeight := VReSize / VSlices
+	m, itype, err := image.Decode(reader)
+	_ = itype
+	// fmt.Println("image type of ", file, itype) // TESTING
+	if err != nil {
+		return colorData, err
+	}
+	bounds := m.Bounds()
 
 	/*
 	* colorData will hold color info for the image
@@ -232,43 +203,53 @@ func getColorData(file string) (imageInfo, error) {
 	* this will be a one dimensional array of 1024 * 3 members
 	 */
 
-	redDepth := mw.GetImageChannelDepth(imagick.CHANNEL_RED)
-	grnDepth := mw.GetImageChannelDepth(imagick.CHANNEL_GREEN)
-	bluDepth := mw.GetImageChannelDepth(imagick.CHANNEL_BLUE)
+	imageHeight := bounds.Max.Y - bounds.Min.Y
+	imageWidth := bounds.Max.X - bounds.Min.X
 
-	mc := imagick.NewMagickWand()
+	// fmt.Println("height:", imageHeight)
+	// fmt.Println("width:", imageWidth)
 
-	// index := 0
+	cellHeight := imageHeight / VSlices
+	cellWidth := imageWidth / HSlices
+
 	for vCell := 0; vCell < VSlices; vCell++ {
+
+		cellTop := bounds.Min.Y + (vCell * cellHeight)
+		cellBottom := cellTop + cellHeight
 
 		for hCell := 0; hCell < HSlices; hCell++ {
 
-			mc = mw.GetImageRegion(uint(cellWidth), uint(cellHeight), int(vCell*cellHeight), int(hCell*cellWidth))
+			cellLeft := bounds.Min.X + (hCell * cellWidth)
+			cellRight := cellLeft + cellWidth
 
-			var redAvg, grnAvg, bluAvg float64
+			// can this exceed uint32?
+			var rsum, gsum, bsum uint32
 
-			if redAvg, _, err = mc.GetImageChannelMean(imagick.CHANNEL_RED); err != nil {
-				fmt.Println("red channel error: , ", err)
+			for y := cellTop; y < cellBottom; y++ {
+				for x := cellLeft; x < cellRight; x++ {
+					r, g, b, _ := m.At(x, y).RGBA()
+					rsum += r
+					gsum += g
+					bsum += b
+				}
 			}
-			if grnAvg, _, err = mc.GetImageChannelMean(imagick.CHANNEL_GREEN); err != nil {
-				fmt.Println("green channel error: , ", err)
-			}
-			if bluAvg, _, err = mc.GetImageChannelMean(imagick.CHANNEL_BLUE); err != nil {
-				fmt.Println("blue channel error: , ", err)
-			}
+
+			ravg := rsum / uint32(cellHeight*cellWidth)
+			gavg := gsum / uint32(cellHeight*cellWidth)
+			bavg := bsum / uint32(cellHeight*cellWidth)
 
 			/* make sure we're using 8 bit color */
-			redRnd := make8bit(redAvg, redDepth)
-			grnRnd := make8bit(grnAvg, grnDepth)
-			bluRnd := make8bit(bluAvg, bluDepth)
+			ru8 := uint8(ravg >> 8)
+			gu8 := uint8(gavg >> 8)
+			bu8 := uint8(bavg >> 8)
 
-			colorData.Cdata = append(colorData.Cdata, redRnd, grnRnd, bluRnd)
+			fmt.Println("cell", vCell, hCell, ravg, ru8, gavg, gu8, bavg, bu8)
+
+			colorData.Cdata = append(colorData.Cdata, ru8, gu8, bu8)
 
 		}
 	}
 
-	// mw.Destroy()
-	// imagick.Terminate()
 	return colorData, nil
 }
 
@@ -280,10 +261,12 @@ func validateCD(cd imageInfo) error {
 	if gotLen != xpcLen {
 		return fmt.Errorf("Expect array length %d, got %d\n", xpcLen, gotLen)
 	}
-	sum := uint8(0)
+	fmt.Println("arraylen:", gotLen, xpcLen)
+	sum := uint32(0)
 	for _, i := range cd.Cdata {
-		sum += i
+		sum += uint32(i)
 	}
+	fmt.Println("sum:", sum)
 	if sum == 0 {
 		return fmt.Errorf("No data in array\n")
 	}
