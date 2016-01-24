@@ -1,8 +1,7 @@
 package main
 
 /*
- *  https://gowalker.org/github.com/gographics/imagick/imagick
- *  crashing a lot, switch to https://golang.org/pkg/image/
+ * Identify duplicate photo files
  *
  * Logic:
  *
@@ -14,8 +13,8 @@ package main
  *
  * cycle through 32x32 x,y coordinates (1024 cycles)
  *         extract portion of image image
- *         GetImageChannelMean of portion for CHANNEL_RED, CHANNEL_GREEN, CHANNEL_BLUE ( and CHANNELS_GRAY? )
- *         add r, g, b (and gray?) mean values to array
+ *         GetImageChannelMean of portion for CHANNEL_RED, CHANNEL_GREEN, CHANNEL_BLUE
+ *         add r, g, b mean values to array
  *
  * resulting array is used to compare similarity data
  *
@@ -24,23 +23,19 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
-	// "encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io/ioutil"
 	"math"
 	"os"
 	"runtime"
 	"strings"
-	// _ "image/gif"
-	// _ "image/png"
-	_ "image/jpeg"
 )
-
-// import "github.com/gographics/imagick/imagick"
-// import imagick "github.com/rainycape/magick"
 
 type imageInfo struct {
 	Size  int64
@@ -73,7 +68,7 @@ const (
 	simpleThresh = 10
 	prismThresh  = 10
 	stdDevThresh = 15
-	suffix       = ".cz"
+	suffix       = ".pdz"
 )
 
 func main() {
