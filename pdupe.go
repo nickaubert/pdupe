@@ -65,7 +65,7 @@ const (
 	VSlices      = 32
 	HReSize      = 128
 	VReSize      = 128
-	simpleThresh = 10
+	simpleThresh = 25
 	prismThresh  = 10
 	stdDevThresh = 15
 	suffix       = ".pdz"
@@ -77,7 +77,7 @@ func main() {
 
 	reference_file := flag.String("r", "", "compare against reference file")
 	comp_type := flag.String("c", "s", "s=simple, p=prism, d=stddev")
-	threshold := flag.Int("t", 10, "compare type (10=default for simple)")
+	threshold := flag.Int("t", simpleThresh, "threshold")
 	overwrite := flag.Bool("o", false, fmt.Sprintf("overwrite %s filesa", suffix))
 	dataonly := flag.Bool("d", false, fmt.Sprintf("generate %s files only (dont compare)", suffix))
 	verbose := flag.Bool("v", false, "verbose")
@@ -342,6 +342,9 @@ func compareImages(s status, images, refImages []imageInfo) {
 	if len(refImages) > 0 {
 		for _, rImage := range refImages {
 			for _, image := range images {
+				if image.Path == rImage.Path {
+					continue // skip if same image
+				}
 				showMatch(s, rImage, image)
 			}
 		}
